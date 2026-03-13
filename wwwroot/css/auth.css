@@ -1,0 +1,14 @@
+.auth-card { max-width: 540px; margin: 0 auto; }
+
+/* Link Styles - Simple UI Enhancement */
+.link-btn-primary {
+  color: #0d6efd;
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.link-btn-primary:hover {
+  color: #0056b3;
+  text-decoration: underline;
+}
