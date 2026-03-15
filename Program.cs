@@ -10,7 +10,12 @@ Env.Load();
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllersWithViews();
+var mvcBuilder = builder.Services.AddControllersWithViews();
+
+if (builder.Environment.IsDevelopment())
+{
+    mvcBuilder.AddRazorRuntimeCompilation();
+}
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -55,7 +60,15 @@ using (var scope = app.Services.CreateScope())
         .CreateLogger("DatabaseStartup");
     try
     {
-        db.Database.Migrate();
+        var runMigrations = args.Any(a => string.Equals(a, "--migrate", StringComparison.OrdinalIgnoreCase));
+        if (runMigrations)
+        {
+            db.Database.Migrate();
+        }
+        else
+        {
+            logger.LogInformation("Skipping automatic migrations. Pass --migrate to apply DB updates.");
+        }
 
         var wipeUserGenerated = args.Any(a => string.Equals(a, "--wipe-user-generated", StringComparison.OrdinalIgnoreCase));
         var wipeAllData = args.Any(a => string.Equals(a, "--wipe-all-data", StringComparison.OrdinalIgnoreCase));

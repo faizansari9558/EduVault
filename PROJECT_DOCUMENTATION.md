@@ -1,5 +1,5 @@
-Version: 2.1
-Last Updated: 26/02/2026
+Version: 2.3
+Last Updated: 14/03/2026
 Updated By: Auto-Documentation System
 
 # Smart E-Library
@@ -44,6 +44,8 @@ It stores educational content by semester/subject/topic and records:
   - Assign teachers to subjects
   - Review and decide semester enrollment requests
   - View system-wide progress reports
+  - Generate and publish semester results (per-student and per-semester)
+  - Control result visibility (publish / unpublish per semester)
 - Teacher:
   - Upload chapter-style materials as rich-text pages
   - Optionally attach a quiz after a page (multiple questions supported)
@@ -54,6 +56,8 @@ It stores educational content by semester/subject/topic and records:
   - Browse the library and read materials after approval
   - Read chapter pages in order (with completion tracking)
   - Attempt quizzes after approval
+  - View semester results (only after Admin publishes them)
+  - Print or download result as PDF via browser print dialog
 
 **Out of scope (not implemented / not guaranteed):**
 - Payment features
@@ -128,6 +132,7 @@ Based on the current EF Core model, the database tables are:
 - QuizResults
 - ProgressTrackings
 - OtpVerifications
+- SemesterResultPublishes
 
 ### Table Description (simple)
 - **Users**: Stores shared identity and login fields used for authentication and authorization (phone, password hash, role, approval status, created date, etc.).
@@ -148,6 +153,7 @@ Based on the current EF Core model, the database tables are:
 - **QuizResults**: Stores a student’s quiz attempt score and submission time.
 - **ProgressTrackings**: Stores overall progress values (screen time, completion, quiz score, progress percent, low engagement flag) for a student per subject/topic/material.
 - **OtpVerifications**: Stores OTP codes and validity status for phone verification.
+- **SemesterResultPublishes**: Tracks whether a semester's results have been published by an admin. One row per semester. Stores `IsPublished`, `PublishedAtUtc`, and `PublishedByAdminId`.
 
 ### Relationships
 In simple terms:
@@ -165,6 +171,7 @@ In simple terms:
 Approval and tracking highlights:
 - **StudentEnrollments** includes: `IsApproved`, `ApprovedAt`, `ApprovedByAdminId`.
 - **MaterialPageProgress** stores reading time and completion.
+- **SemesterResultPublishes** has a unique index on `SemesterId` (one publish record per semester).
 
 ### ER explanation in simple language
 Think of the database like linked lists of information:
@@ -197,18 +204,25 @@ Think of the database like linked lists of information:
 - Approve or reject semester enrollment requests.
 - View students grouped by semester.
 - View system progress analytics report.
+- **Semester Result Management**:
+  - View all semesters with publication status and enrolled student count.
+  - Drill into a semester to see all approved students' computed results (sorted by result %).
+  - View full per-subject, per-chapter result breakdown for any individual student.
+  - Publish results for a semester → students can then view their own results.
+  - Unpublish results at any time → students lose access until re-published.
 
 ### Teacher Features
 - View dashboard summary (material count, quiz count, low engagement count).
 - Upload chapter materials with:
   - Title and description
   - Multiple pages (page title + rich text content)
-  - Page length guidance (encourages splitting long content into separate pages)
+   - Minimum 2 pages per chapter
+   - Page length guidance (encourages splitting long content into separate pages)
   - Optional quiz after a page (multiple questions supported; quiz title optional)
 - Insert or delete pages before saving, with automatic page re-sequencing
 - View uploaded materials.
 - Preview chapter pages.
-- Create quizzes.
+- Create standalone quizzes with optional time limit and availability window.
 - View “Student Progress Analytics” for students who interacted with the teacher’s materials.
 - Each teacher is assigned a unique Teacher ID (e.g., `TID0001`).
 
@@ -219,12 +233,21 @@ Think of the database like linked lists of information:
 - Browse library materials by semester/subject and search.
 - Read materials:
   - Chapters can be read page-by-page
-  - Pages must be completed in order
-  - A minimum reading time per page is required before completion (3 minutes)
+   - Opening a page creates a reading-progress record if one does not already exist
+   - First-time completion stores active reading time, scroll depth, and completion status
+   - Re-visits do not overwrite already completed page progress
 - Quizzes:
-  - Quizzes can be linked to pages
-  - Page quizzes can include multiple questions and appear in a modal popup
-  - Passing condition is used (example: 50% or above)
+   - Quizzes can be linked to chapter pages or created as standalone subject quizzes
+   - Page quizzes appear in a modal popup only when the completed page has a quiz with questions and the student has not already attempted it
+   - Standalone quizzes can have optional opening/closing times and an optional time limit
+   - Quiz scores are stored for analytics; there is no pass/fail threshold in the current code
+- **Semester Results**:
+   - Student can view a list of their enrolled semesters that have published results
+   - For each published semester, student sees a subject-wise and chapter-wise breakdown
+   - Each chapter row shows: Completion %, Quiz Score %, and Chapter Result %
+   - Each subject shows a Subject Average (average of chapter results in that subject)
+   - Semester Final Result = average of all Subject Averages
+   - A print/download option opens a clean print-layout page that auto-triggers the browser print dialog (student can Save as PDF)
 
 ### Progress Analytics Formula (Current)
 Student final progress is calculated using weighted metrics:
@@ -235,6 +258,92 @@ Student final progress is calculated using weighted metrics:
 Formula:
 - Final Progress (%) = (Screen Time % × 0.50) + (Quiz Score % × 0.40) + (Completion % × 0.10)
 
+### Progress Calculation Criteria (Actual Code Rules)
+The current code calculates per-material student progress using the following rules.
+
+#### A) Upload Chapter Criteria
+- Teacher must select a subject that is already assigned to that teacher.
+- Semester is auto-derived from the selected subject.
+- Chapter title is required.
+- A chapter must contain at least 2 pages.
+- Every page must have:
+  - Page title
+  - Rich-text HTML content
+- Page content must stay within the rich-text length validator limit.
+- A page quiz is optional.
+- If a page quiz is added, every question must contain:
+  - Question text
+  - Option A
+  - Option B
+  - Option C
+  - Option D
+  - Correct option limited to `A`, `B`, `C`, or `D`
+- If a page quiz title is left blank, the system auto-generates one in the format `Quiz - {Material Title} - Page {PageNumber}`.
+- Saved chapter pages are numbered sequentially and stored as rich-text chapter material.
+
+#### B) Standalone Create Quiz Criteria
+- Teacher must select a valid subject assigned to that teacher.
+- Quiz title is required and limited to 180 characters.
+- The quiz must contain at least 1 question.
+- Each question must contain:
+   - Question text (up to 500 characters)
+   - Option A, B, C, and D (each up to 200 characters)
+   - Correct option limited to `A`, `B`, `C`, or `D`
+- Time limit is optional, but when used it must be between 1 and 300 minutes.
+- `Available From` and `Available To` are optional; when entered, they are converted from local time to UTC before storage.
+- Standalone quizzes are stored without a linked chapter page (`MaterialPageId = null`).
+
+#### C) Student Progress Calculation Criteria
+- Progress is recalculated when:
+   - A student completes a chapter page for the first time
+   - A student submits a chapter-linked quiz for the first time
+- Re-opening or re-completing an already completed page does not overwrite stored page time.
+- Re-submitting an already submitted page quiz does not create a second score for progress calculation.
+- Only chapter-linked quizzes are included in per-material progress calculation.
+- Standalone quizzes created from `Create Quiz` are stored and reported separately; they do not feed the per-material progress formula.
+
+#### D) Screen Time % Criteria
+- Total recorded reading time is the sum of page `TimeSpentSeconds` for the student on that material.
+- For the formula, the system uses an effective reading time that can be reduced by low scroll depth.
+- If a page scroll depth is below 30%, that page's time contribution is scaled by `scrollDepth / 30`.
+- If scroll depth is 30% or above, the full page time counts.
+- Ideal reading reference is fixed at 6 minutes per page.
+- Ideal total reading time = `Total Pages × 6 minutes`.
+- Screen Time % = `(Effective Reading Time / Ideal Total Reading Time) × 100`, capped at 100%.
+
+#### E) Quiz Score % Criteria
+- The system collects all chapter-linked quizzes for the material.
+- For each quiz, only the student's latest attempt is used.
+- Quiz score is based on total correct answers across the material's chapter-linked quizzes.
+- Quiz Score % = `(Total Correct Answers / Total Quiz Questions) × 100`.
+- If quizzes exist but the student has not attempted them, Quiz Score % remains 0.
+- If no chapter-linked quiz exists for the material, Quiz Score % is 0.
+
+#### F) Completion % Criteria
+- Completion % = `(Completed Pages / Total Pages) × 100`.
+- A page counts as completed when the student posts `CompletePage` for that page.
+
+#### G) Final Progress Output Stored in Database
+- `ScreenTimeSeconds`
+- `ScrollDepthPercent` (average scroll depth)
+- `CompletionPercent`
+- `QuizScorePercent`
+- `QuizCorrectAnswers`
+- `QuizTotalQuestions`
+- `ProgressPercent`
+- `LastUpdatedUtc`
+- `IsLowEngagementAlert`
+
+#### H) Low Engagement Criteria
+- A page is marked low-engagement when first-time completion records less than 30 active seconds.
+- Material progress is also marked low-engagement when the minimum completed-page time for the material is below 30 seconds.
+- Low-engagement status affects teacher/admin analytics and alerts; it does not block student navigation.
+
+#### I) Student-Facing Progress Status
+- `Not Started`: no page-progress record and no quiz activity for the material
+- `In Progress`: some activity exists, but completion is below 100%
+- `Completed`: completion is 100%
+
 Status bands used in analytics:
 - Skimmer: < 20%
 - NeedsImprovement: ≥ 20% and < 40%
@@ -242,6 +351,35 @@ Status bands used in analytics:
 - Progressing: ≥ 60% and < 80%
 - ActiveLearner: ≥ 80% and < 90%
 - Mastered: ≥ 90%
+
+#### J) Semester Result Calculation
+The semester result system aggregates per-material progress into a single semester result score.
+
+**Step 1 — Chapter Result %**
+- For each chapter (rich-text material with at least one page), the stored `ProgressPercent` in `ProgressTrackings` is used directly.
+- This value is maintained automatically by the system every time a student completes a page or submits a quiz.
+
+**Step 2 — Subject Average %**
+- For each subject in the semester, all chapters belonging to that subject are collected.
+- Subject Average = average of all chapter `ProgressPercent` values for that student.
+- Chapters with no `ProgressTracking` record count as 0%.
+
+**Step 3 — Semester Final Result %**
+- Semester Final Result = average of all Subject Averages for the semester.
+- Subjects with no chapters are excluded from the average.
+
+**Result Status Bands (Semester Result)**
+| Range | Status |
+|---|---|
+| ≥ 80% | Excellent |
+| ≥ 60% and < 80% | Good |
+| ≥ 40% and < 60% | Average |
+| < 40% | Needs Improvement |
+
+**Publish Control**
+- Results are only visible to students after an Admin explicitly publishes them for that semester.
+- The admin can unpublish at any time to hide results.
+- Result calculation happens live at request time (not cached), so the result always reflects the latest progress data.
 
 ## 10. Non-Functional Requirements
 ### Performance
@@ -277,6 +415,7 @@ Can:
 - Create semesters and subjects
 - Assign teachers to subjects
 - View system-wide reports
+- Generate, view, publish, and unpublish semester results
 
 ### Teacher
 Can:
@@ -291,10 +430,13 @@ Can:
 - Enroll in semesters
 - Access library materials (based on enrollment and public materials)
 - Read pages and attempt quizzes
+- View published semester results (subject-wise and chapter-wise breakdown)
+- Print or download semester result as PDF
 
 Cannot:
 - Upload materials
 - Manage other users
+- View results before Admin publishes them
 
 ## 12. Application Workflow (Step-by-step process)
 ### A) Teacher Registration
@@ -322,15 +464,24 @@ Cannot:
 6. Admin reviews semester enrollment requests and approves/rejects.
 7. Admin can view students grouped semester-wise.
 8. Admin views system reports.
+9. Admin opens **Semester Results**.
+10. Admin selects a semester to view all enrolled students' computed results.
+11. Admin can click any student to view full per-chapter result breakdown.
+12. Admin clicks **Publish Results** when ready → students can now view their results.
+13. Admin can **Unpublish** at any time to hide results from students.
 
 ### D) Teacher Workflow
 1. Teacher logs in.
 2. Teacher opens Upload Material.
 3. Teacher selects assigned subject (semester auto-fills).
-4. Teacher adds one or more pages.
-5. Teacher can add a quiz after a page (multiple questions).
-6. Teacher saves material.
-7. Teacher views student progress analytics.
+4. Teacher enters chapter title and optional description.
+5. Teacher adds at least 2 pages.
+6. Each page must contain a page title and rich-text content.
+7. Teacher can optionally add a quiz after any page.
+8. If a page quiz is added, each question must include text, options A-D, and one correct option.
+9. Teacher saves the chapter.
+10. Teacher can also create standalone quizzes with optional time limit and availability window.
+11. Teacher views student progress analytics.
 
 ### E) Student Workflow
 1. Student logs in with phone number → OTP.
@@ -338,10 +489,48 @@ Cannot:
 3. Student waits for admin approval.
 4. Student opens Library after approval.
 5. Student selects a material and reads it.
-6. Student reads each page for the required minimum time (3 minutes) before completing it.
-7. System records page progress (started/completed/time).
-8. If a quiz is attached to the page, it appears as a popup (modal) and the student answers it.
-9. Student views their dashboard and progress updates.
+6. Opening a page starts or resumes a page-progress record.
+7. When the student completes a page, the system records active time, scroll depth, and completion status.
+8. If the completed page has a quiz and the student has not already attempted it, the quiz appears in a modal popup.
+9. The system stores quiz score for analytics and recalculates material progress.
+10. Student views the dashboard and progress updates.
+11. When Admin publishes results, student opens **My Results**.
+12. Student selects their semester to view subject-wise and chapter-wise result breakdown.
+13. Student clicks **Print / Download PDF** to print or save the result as a PDF.
+
+### F) Semester Result Workflow
+```
+[Admin] Semester Results page
+         │
+         ▼
+   List of semesters → click "View Results" on a semester
+         │
+         ▼
+   See all enrolled students with computed Final Result %
+         │
+         ├── Click a student → Full per-chapter breakdown (Admin Student Result)
+         │
+         ├── [NOT PUBLISHED] → Click "Publish Results"
+         │                    → Students can now see their result
+         │
+         └── [PUBLISHED]     → Click "Unpublish Results"
+                              → Result hidden from students again
+
+[Student] My Results page
+         │
+         ▼
+   List of semesters with published results
+         │
+         ▼
+   Click a semester → Subject + Chapter breakdown + Final Result %
+         │
+         ▼
+   Click "Print / Download PDF"
+         │
+         ▼
+   Print layout opens in new tab → auto-triggers print dialog
+   Student chooses "Save as PDF"
+```
 
 ## 13. Deployment Details
 ### Local Development
@@ -368,6 +557,9 @@ Steps:
 - Session-based authentication may need redesign for large-scale deployments.
 - Reporting is currently focused on progress analytics and may not cover all business reports.
 - Material content storage uses rich-text HTML for chapter pages; file uploads depend on implementation details and server storage.
+- Semester result calculation only includes rich-text chapter materials (MaterialType = Notes) that have at least one page. PDF/PPT/Image/ExternalLink materials are excluded from the result formula.
+- No PDF library is installed; PDF download relies on the browser's built-in "Save as PDF" print feature.
+- Semester results are calculated live at request time (not pre-computed), which is fine for normal classroom-sized usage but may be slow for very large datasets.
 
 ## 15. Future Enhancements
 - Integrate a real SMS provider for OTP delivery.
@@ -380,6 +572,8 @@ Steps:
 ## 16. Version History
 | Version | Date | Changes |
 |---------|------|---------|
+| 2.3 | 14/03/2026 | Added Semester Result Management System documentation: admin publish/unpublish workflow, student result view and PDF download, semester result calculation formula (chapter → subject average → semester average), result status bands, new SemesterResultPublishes DB table, and updated scope, features, workflow, limitations, and version history |
+| 2.2 | 14/03/2026 | Corrected student progress documentation to match current code, added exact chapter upload and standalone quiz validation criteria, and documented the real progress calculation rules including scroll-depth weighting and low-engagement logic |
 | 2.1 | 26/02/2026 | Updated student progress analytics formula to 50/40/10 (Screen Time/Quiz/Completion) and documented active status bands (Skimmer → Mastered) |
 | 2.0 | 22/02/2026 | Major architecture and workflow improvements (normalized role tables, separate registration, admin approvals, semester enrollment approvals, page-based content, enhanced quizzes, engagement tracking, Teacher ID rename) |
 | 1.0 | 21/02/2026 | Initial documentation created based on current project state |
@@ -503,7 +697,7 @@ Steps:
              ▼
   ┌──────────────────────┐
   │ Admin Reviews        │
-  │ & Approves Enrollment
+   │ & Approves Enrollment│
   └──────────┬───────────┘
              │
              ▼
@@ -538,7 +732,7 @@ Steps:
   │ Add Page(s):         │
   │ - Title              │
   │ - Rich-text Content  │
-  │ (Minimum 3 pages)    │
+   │ (Minimum 2 pages)    │
   └──────────┬───────────┘
              │
              ▼
@@ -559,7 +753,7 @@ Steps:
   │ If Quiz Selected:    │
   │ - Enter Q Title      │
   │ - Add Questions      │
-  │ - Set Pass %         │
+   │ - Set Correct Option │
   └──────────┬───────────┘
              │
              ▼
@@ -604,26 +798,20 @@ Steps:
              ▼
   ┌──────────────────────┐
   │ Read Page 1 Content  │
-  │ Timer Starts         │
-  │ (Min 3 minutes)      │
+  │ Progress Starts      │
+  │ Track Activity       │
   └──────────┬───────────┘
              │
              ▼
   ┌──────────────────────┐
-  │ Has 3 min Elapsed?   │
+  │ Student Completes    │
+  │ Page                 │
   └──────────┬───────────┘
              │
-      ┌──────┴──────┐
-      │             │
-      ▼             ▼
-   [YES]          [NO - Wait]
-      │             │
-      │    ┌────────┘
-      │    │
-      ▼    ▼
   ┌──────────────────────┐
   │ Mark Page Complete   │
-  │ Record: Time, Status │
+  │ Record: Active Time, │
+  │ Scroll, Status       │
   └──────────┬───────────┘
              │
              ▼
@@ -647,8 +835,8 @@ Steps:
              │
              ▼
   ┌──────────────────────┐
-  │ Calculate Score &    │
-  │ Check Pass %         │
+   │ Calculate Score &    │
+   │ Save Attempt         │
   └──────────┬───────────┘
              │
              ▼

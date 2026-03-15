@@ -519,7 +519,11 @@ public class AdminController(ApplicationDbContext dbContext, IProgressService pr
 
     public async Task<IActionResult> Reports()
     {
-        var totalPages = await dbContext.MaterialPages.CountAsync();
+        var totalPagesBySemester = await dbContext.MaterialPages
+            .Include(x => x.Material)
+            .GroupBy(x => x.Material!.SemesterId)
+            .Select(g => new { SemesterId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.SemesterId, x => x.Count);
 
         var pageQuizIds = await dbContext.Quizzes
             .Where(x => x.MaterialPageId != null)
@@ -534,7 +538,13 @@ public class AdminController(ApplicationDbContext dbContext, IProgressService pr
                 .Select(g => new { QuizId = g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.QuizId, x => x.Count);
 
-        var totalQuizQuestions = quizQuestionCounts.Values.Sum();
+        var totalQuizQuestionsBySemester = await dbContext.QuizQuestions
+            .Include(x => x.Quiz)
+            .ThenInclude(x => x!.Material)
+            .Where(x => x.Quiz!.MaterialPageId != null)
+            .GroupBy(x => x.Quiz!.Material!.SemesterId)
+            .Select(g => new { SemesterId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.SemesterId, x => x.Count);
 
         var includedSemesterIds = await dbContext.Semesters.Select(x => x.Id).ToListAsync();
         var includedSemesters = await dbContext.Semesters.ToDictionaryAsync(x => x.Id, x => x.Name);
@@ -587,6 +597,14 @@ public class AdminController(ApplicationDbContext dbContext, IProgressService pr
                 _ => "Multiple"
             };
 
+            var studentSemesterIds = studentEnrollments.Select(x => x.SemesterId).ToList();
+            var totalPages = studentSemesterIds.Count > 0 
+                ? studentSemesterIds.Sum(sId => totalPagesBySemester.TryGetValue(sId, out var p) ? p : 0) 
+                : totalPagesBySemester.Values.Sum();
+            var totalQuizQuestions = studentSemesterIds.Count > 0
+                ? studentSemesterIds.Sum(sId => totalQuizQuestionsBySemester.TryGetValue(sId, out var q) ? q : 0)
+                : totalQuizQuestionsBySemester.Values.Sum();
+
             var studentPageProgress = pageProgress.Where(x => x.StudentId == studentId).ToList();
             var totalTimeSeconds = studentPageProgress.Sum(x => x.TimeSpentSeconds);
             var screenTimeMinutes = totalTimeSeconds / 60d;
@@ -604,7 +622,7 @@ public class AdminController(ApplicationDbContext dbContext, IProgressService pr
                 .Count();
 
             var completedPages = studentPageProgress.Count(x => x.IsCompleted);
-            var completionPercent = totalPages == 0 ? 0d : (double)completedPages / totalPages * 100d;
+            var completionPercent = totalPages == 0 ? 0d : Math.Clamp((double)completedPages / totalPages * 100d, 0, 100);
 
             var quizCorrectAnswers = quizResults
                 .Where(x => x.StudentId == studentId)
@@ -628,7 +646,7 @@ public class AdminController(ApplicationDbContext dbContext, IProgressService pr
 
             var quizScorePercent = totalQuizQuestions <= 0
                 ? 0d
-                : Math.Round((double)quizCorrectAnswers / totalQuizQuestions * 100d, 2);
+                : Math.Clamp(Math.Round((double)quizCorrectAnswers / totalQuizQuestions * 100d, 2), 0, 100);
 
             var studentViolations = quizResults
                 .Where(x => x.StudentId == studentId && x.IsAutoSubmitted)
@@ -725,5 +743,279 @@ public class AdminController(ApplicationDbContext dbContext, IProgressService pr
         }
 
         return ("Skimmer", "bg-danger");
+    }
+
+    // =====================================================================
+    // Semester Result Management
+    // =====================================================================
+
+    public async Task<IActionResult> SemesterResults()
+    {
+        var semesters = await dbContext.Semesters.OrderBy(x => x.Name).ToListAsync();
+        var publications = await dbContext.SemesterResultPublishes.ToListAsync();
+        var pubDict = publications.ToDictionary(x => x.SemesterId);
+
+        var enrollmentCounts = await dbContext.StudentEnrollments
+            .Where(x => x.IsApproved)
+            .GroupBy(x => x.SemesterId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count);
+
+        var model = new SemesterResultIndexViewModel
+        {
+            Semesters = semesters.Select(s => new SemesterResultRowViewModel
+            {
+                SemesterId = s.Id,
+                SemesterName = s.Name,
+                ApprovedStudentCount = enrollmentCounts.TryGetValue(s.Id, out var c) ? c : 0,
+                IsPublished = pubDict.TryGetValue(s.Id, out var pub) && pub.IsPublished,
+                PublishedAtUtc = pubDict.TryGetValue(s.Id, out var pub2) ? pub2.PublishedAtUtc : null
+            }).ToList()
+        };
+
+        return View(model);
+    }
+
+    public async Task<IActionResult> SemesterResultDetail(int semesterId)
+    {
+        var semester = await dbContext.Semesters.FindAsync(semesterId);
+        if (semester is null) return NotFound();
+
+        var publication = await dbContext.SemesterResultPublishes
+            .FirstOrDefaultAsync(x => x.SemesterId == semesterId);
+
+        var enrollments = await dbContext.StudentEnrollments
+            .Include(x => x.Student)
+            .Where(x => x.SemesterId == semesterId && x.IsApproved)
+            .ToListAsync();
+
+        var studentIds = enrollments.Select(x => x.StudentId).ToList();
+
+        var enrollmentNumbers = await dbContext.Students
+            .Where(x => studentIds.Contains(x.UserId))
+            .Select(x => new { x.UserId, x.EnrollmentNumber })
+            .ToDictionaryAsync(x => x.UserId, x => x.EnrollmentNumber);
+
+        var subjectIds = await dbContext.Subjects
+            .Where(x => x.SemesterId == semesterId)
+            .Select(x => x.Id)
+            .ToListAsync();
+
+        // Only chapters that have at least one page participate in scoring
+        var materials = await dbContext.Materials
+            .Where(x => subjectIds.Contains(x.SubjectId)
+                     && x.MaterialType == MaterialType.Notes
+                     && dbContext.MaterialPages.Any(p => p.MaterialId == x.Id))
+            .Select(x => new { x.Id, x.SubjectId })
+            .ToListAsync();
+
+        var materialIds = materials.Select(x => x.Id).ToList();
+
+        var progressTrackings = materialIds.Count > 0
+            ? await dbContext.ProgressTrackings
+                .Where(x => studentIds.Contains(x.StudentId)
+                         && x.MaterialId != null
+                         && materialIds.Contains(x.MaterialId.Value))
+                .ToListAsync()
+            : new List<ProgressTracking>();
+
+        var studentRows = new List<StudentResultSummaryRow>();
+
+        foreach (var enrollment in enrollments)
+        {
+            var sid = enrollment.StudentId;
+            var finalResult = CalculateSemesterResult(sid, subjectIds, materials.Select(m => (m.Id, m.SubjectId)).ToList(), progressTrackings);
+
+            var (status, statusClass) = SemesterResultHelper.GetStatus(finalResult);
+
+            studentRows.Add(new StudentResultSummaryRow
+            {
+                StudentId = sid,
+                StudentName = enrollment.Student?.FullName ?? "Unknown",
+                EnrollmentNumber = enrollmentNumbers.TryGetValue(sid, out var en) ? en : "-",
+                FinalResult = finalResult,
+                Status = status,
+                StatusClass = statusClass
+            });
+        }
+
+        var model = new SemesterResultDetailViewModel
+        {
+            SemesterId = semesterId,
+            SemesterName = semester.Name,
+            IsPublished = publication?.IsPublished ?? false,
+            PublishedAtUtc = publication?.PublishedAtUtc,
+            Students = studentRows.OrderByDescending(x => x.FinalResult).ToList()
+        };
+
+        return View(model);
+    }
+
+    public async Task<IActionResult> AdminStudentResult(int studentId, int semesterId)
+    {
+        var semester = await dbContext.Semesters.FindAsync(semesterId);
+        if (semester is null) return NotFound();
+
+        var user = await dbContext.Users.FindAsync(studentId);
+        if (user is null) return NotFound();
+
+        var publication = await dbContext.SemesterResultPublishes
+            .FirstOrDefaultAsync(x => x.SemesterId == semesterId);
+
+        var student = await dbContext.Students.FirstOrDefaultAsync(x => x.UserId == studentId);
+
+        var subjects = await dbContext.Subjects
+            .Where(x => x.SemesterId == semesterId)
+            .OrderBy(x => x.Name)
+            .ToListAsync();
+
+        var subjectIds = subjects.Select(x => x.Id).ToList();
+
+        var materials = await dbContext.Materials
+            .Where(x => subjectIds.Contains(x.SubjectId)
+                     && x.MaterialType == MaterialType.Notes
+                     && dbContext.MaterialPages.Any(p => p.MaterialId == x.Id))
+            .OrderBy(x => x.Title)
+            .ToListAsync();
+
+        var materialIds = materials.Select(x => x.Id).ToList();
+
+        var progressTrackings = materialIds.Count > 0
+            ? await dbContext.ProgressTrackings
+                .Where(x => x.StudentId == studentId
+                         && x.MaterialId != null
+                         && materialIds.Contains(x.MaterialId.Value))
+                .ToListAsync()
+            : new List<ProgressTracking>();
+
+        var progressDict = progressTrackings
+            .Where(x => x.MaterialId.HasValue)
+            .ToDictionary(x => x.MaterialId!.Value);
+
+        var subjectResults = new List<SubjectResultViewModel>();
+        var allSubjectAverages = new List<double>();
+
+        foreach (var subject in subjects)
+        {
+            var subMaterials = materials.Where(x => x.SubjectId == subject.Id).ToList();
+            if (subMaterials.Count == 0) continue;
+
+            var matRows = subMaterials.Select(m =>
+            {
+                var p = progressDict.TryGetValue(m.Id, out var pt) ? pt : null;
+                return new MaterialResultRowViewModel
+                {
+                    Title = m.Title,
+                    CompletionPercent = Math.Round(p?.CompletionPercent ?? 0d, 1),
+                    QuizScorePercent = Math.Round(p?.QuizScorePercent ?? 0d, 1),
+                    FinalProgress = Math.Round(p?.ProgressPercent ?? 0d, 1)
+                };
+            }).ToList();
+
+            var subAvg = Math.Round(matRows.Average(x => x.FinalProgress), 1);
+            allSubjectAverages.Add(subAvg);
+
+            subjectResults.Add(new SubjectResultViewModel
+            {
+                SubjectName = subject.Name,
+                Materials = matRows,
+                SubjectAverage = subAvg
+            });
+        }
+
+        var finalResult = allSubjectAverages.Count == 0 ? 0d : Math.Round(allSubjectAverages.Average(), 2);
+        var (status, statusClass) = SemesterResultHelper.GetStatus(finalResult);
+
+        var model = new StudentSemesterResultViewModel
+        {
+            StudentId = studentId,
+            StudentName = user.FullName,
+            EnrollmentNumber = student?.EnrollmentNumber ?? "-",
+            SemesterId = semesterId,
+            SemesterName = semester.Name,
+            IsPublished = publication?.IsPublished ?? false,
+            Subjects = subjectResults,
+            FinalResult = finalResult,
+            Status = status,
+            StatusClass = statusClass,
+            IsOwnResult = false
+        };
+
+        return View(model);
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> PublishSemesterResult(int semesterId)
+    {
+        var adminUserId = HttpContext.Session.GetInt32("UserId");
+        var admin = adminUserId.HasValue
+            ? await dbContext.Admins.FirstOrDefaultAsync(x => x.UserId == adminUserId.Value)
+            : null;
+
+        var publication = await dbContext.SemesterResultPublishes
+            .FirstOrDefaultAsync(x => x.SemesterId == semesterId);
+
+        if (publication is null)
+        {
+            publication = new SemesterResultPublish
+            {
+                SemesterId = semesterId,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            dbContext.SemesterResultPublishes.Add(publication);
+        }
+
+        publication.IsPublished = true;
+        publication.PublishedAtUtc = DateTime.UtcNow;
+        publication.PublishedByAdminId = admin?.Id;
+
+        await dbContext.SaveChangesAsync();
+
+        TempData["Success"] = "Semester results published. Students can now view their results.";
+        return RedirectToAction(nameof(SemesterResultDetail), new { semesterId });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> UnpublishSemesterResult(int semesterId)
+    {
+        var publication = await dbContext.SemesterResultPublishes
+            .FirstOrDefaultAsync(x => x.SemesterId == semesterId);
+
+        if (publication is not null)
+        {
+            publication.IsPublished = false;
+            publication.PublishedAtUtc = null;
+            await dbContext.SaveChangesAsync();
+        }
+
+        TempData["Success"] = "Semester results unpublished.";
+        return RedirectToAction(nameof(SemesterResultDetail), new { semesterId });
+    }
+
+    private static double CalculateSemesterResult(
+        int studentId,
+        List<int> subjectIds,
+        List<(int Id, int SubjectId)> materials,
+        List<ProgressTracking> progressTrackings)
+    {
+        var progressDict = progressTrackings
+            .Where(x => x.StudentId == studentId && x.MaterialId.HasValue)
+            .ToDictionary(x => x.MaterialId!.Value);
+
+        var subjectAverages = new List<double>();
+
+        foreach (var subId in subjectIds)
+        {
+            var subMatIds = materials.Where(x => x.SubjectId == subId).Select(x => x.Id).ToList();
+            if (subMatIds.Count == 0) continue;
+
+            var avg = subMatIds.Sum(mid =>
+                progressDict.TryGetValue(mid, out var pt) ? pt.ProgressPercent : 0d
+            ) / subMatIds.Count;
+
+            subjectAverages.Add(Math.Clamp(avg, 0d, 100d));
+        }
+
+        return subjectAverages.Count == 0 ? 0d : Math.Round(subjectAverages.Average(), 2);
     }
 }

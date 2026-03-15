@@ -879,9 +879,12 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
             .Select(x => x.Id)
             .ToListAsync();
 
-        var totalPages = await dbContext.MaterialPages
-            .Where(p => materialIds.Contains(p.MaterialId))
-            .CountAsync();
+        var totalPagesBySemester = await dbContext.MaterialPages
+            .Include(x => x.Material)
+            .Where(x => materialIds.Contains(x.MaterialId))
+            .GroupBy(x => x.Material!.SemesterId)
+            .Select(g => new { SemesterId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.SemesterId, x => x.Count);
 
         var pageProgress = await dbContext.MaterialPageProgress
             .Include(x => x.Student)
@@ -908,7 +911,13 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
                 .Select(g => new { QuizId = g.Key, Count = g.Count() })
                 .ToDictionaryAsync(x => x.QuizId, x => x.Count);
 
-        var totalQuizQuestions = quizQuestionCounts.Values.Sum();
+        var totalQuizQuestionsBySemester = await dbContext.QuizQuestions
+            .Include(x => x.Quiz)
+            .ThenInclude(x => x!.Material)
+            .Where(x => x.Quiz!.MaterialPageId != null && materialIds.Contains(x.Quiz.MaterialId ?? 0))
+            .GroupBy(x => x.Quiz!.Material!.SemesterId)
+            .Select(g => new { SemesterId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.SemesterId, x => x.Count);
 
         var studentIds = pageProgress.Select(x => x.StudentId)
             .Concat(quizResults.Select(x => x.StudentId))
@@ -963,6 +972,14 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
                 _ => "Multiple"
             };
 
+            var studentSemesterIds = studentEnrollments.Select(x => x.SemesterId).ToList();
+            var totalPages = studentSemesterIds.Count > 0 
+                ? studentSemesterIds.Sum(sId => totalPagesBySemester.TryGetValue(sId, out var p) ? p : 0) 
+                : totalPagesBySemester.Values.Sum();
+            var totalQuizQuestions = studentSemesterIds.Count > 0
+                ? studentSemesterIds.Sum(sId => totalQuizQuestionsBySemester.TryGetValue(sId, out var q) ? q : 0)
+                : totalQuizQuestionsBySemester.Values.Sum();
+
             var studentPageProgress = pageProgress.Where(x => x.StudentId == studentId).ToList();
             var totalTimeSeconds = studentPageProgress.Sum(x => x.TimeSpentSeconds);
             var screenTimeMinutes = totalTimeSeconds / 60d;
@@ -980,7 +997,7 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
                 .Count();
 
             var completedPages = studentPageProgress.Count(x => x.IsCompleted);
-            var completionPercent = totalPages == 0 ? 0d : (double)completedPages / totalPages * 100d;
+            var completionPercent = totalPages == 0 ? 0d : Math.Clamp((double)completedPages / totalPages * 100d, 0, 100);
 
             var quizCorrectAnswers = quizResults
                 .Where(x => x.StudentId == studentId)
@@ -1006,7 +1023,7 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
             // If no quiz exists -> total=0 and score=0.
             var quizScorePercent = totalQuizQuestions <= 0
                 ? 0d
-                : Math.Round((double)quizCorrectAnswers / totalQuizQuestions * 100d, 2);
+                : Math.Clamp(Math.Round((double)quizCorrectAnswers / totalQuizQuestions * 100d, 2), 0, 100);
 
             var studentViolations = quizResults
                 .Where(x => x.StudentId == studentId && x.IsAutoSubmitted)
@@ -1083,6 +1100,36 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
         };
 
         return View(model);
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> DeleteMaterial(int id)
+    {
+        var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
+        var material = await dbContext.Materials
+            .FirstOrDefaultAsync(x => x.Id == id && x.TeacherId == teacherId);
+
+        if (material is null)
+        {
+            return NotFound();
+        }
+
+        if (!string.Equals(material.FilePathOrUrl, "RICH_TEXT", StringComparison.OrdinalIgnoreCase) && 
+            !material.FilePathOrUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            // Try to physical delete the uploaded file
+            var filePath = Path.Combine(env.WebRootPath, material.FilePathOrUrl.TrimStart('/', '\\'));
+            if (System.IO.File.Exists(filePath))
+            {
+                System.IO.File.Delete(filePath);
+            }
+        }
+
+        dbContext.Materials.Remove(material);
+        await dbContext.SaveChangesAsync();
+
+        TempData["Success"] = "Material deleted successfully.";
+        return RedirectToAction(nameof(Materials));
     }
 
     private static (string status, string barClass) GetStatus(double finalProgress)

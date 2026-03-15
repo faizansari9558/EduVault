@@ -4,13 +4,15 @@ using SmartELibrary.Data;
 using SmartELibrary.Models;
 using SmartELibrary.Services;
 using SmartELibrary.ViewModels;
+using System.Text.Json;
 
 namespace SmartELibrary.Controllers;
 
-public class AuthController(ApplicationDbContext dbContext, IOtpService otpService) : Controller
+public class AuthController(ApplicationDbContext dbContext, IOtpService otpService, ITeacherCodeGenerator teacherCodeGenerator) : Controller
 {
     private const string StudentSessionKey = "StudentSessionId";
     private const string PendingStudentPhoneKey = "PendingStudentPhone";
+    private const string PendingRegistrationKey = "PendingRegistration";
 
     [HttpGet]
     public IActionResult VerifyOtp()
@@ -30,7 +32,202 @@ public class AuthController(ApplicationDbContext dbContext, IOtpService otpServi
             return View();
         }
 
-        TempData["Success"] = "Phone verified. Wait for admin approval if required.";
+        var pendingJson = HttpContext.Session.GetString(PendingRegistrationKey);
+        if (string.IsNullOrWhiteSpace(pendingJson))
+        {
+            TempData["Success"] = "Phone verified.";
+            return RedirectToAction("Index", "Home");
+        }
+
+        var pending = JsonSerializer.Deserialize<PendingRegistrationViewModel>(pendingJson);
+        if (pending is null || !string.Equals(pending.PhoneNumber, phoneNumber, StringComparison.Ordinal))
+        {
+            TempData["Error"] = "No pending registration found for this phone number.";
+            return RedirectToAction("Index", "Home");
+        }
+
+        var existingUser = await dbContext.Users.FirstOrDefaultAsync(x => x.PhoneNumber == pending.PhoneNumber);
+        if (existingUser is not null)
+        {
+            TempData["Error"] = "Phone number already registered.";
+            HttpContext.Session.Remove(PendingRegistrationKey);
+            return RedirectToAction("Index", "Home");
+        }
+
+        var existingEmail = await dbContext.Users
+            .AnyAsync(x => x.Email != null && x.Email.ToLower() == pending.Email.ToLower());
+        if (existingEmail)
+        {
+            TempData["Error"] = "Email is already registered.";
+            HttpContext.Session.Remove(PendingRegistrationKey);
+            return RedirectToAction("Index", "Home");
+        }
+
+        var user = new User
+        {
+            FullName = pending.FullName.Trim(),
+            PhoneNumber = pending.PhoneNumber.Trim(),
+            Email = pending.Email.Trim(),
+            PasswordHash = pending.PasswordHash,
+            Role = pending.Role,
+            IsApproved = false,
+            CreatedAtUtc = DateTime.UtcNow
+        };
+
+        dbContext.Users.Add(user);
+        await dbContext.SaveChangesAsync();
+
+        if (pending.Role == UserRole.Teacher)
+        {
+            dbContext.Teachers.Add(new Teacher
+            {
+                UserId = user.Id,
+                TeacherId = await teacherCodeGenerator.GenerateNextAsync(),
+                AssignedAtUtc = DateTime.UtcNow
+            });
+        }
+        else if (pending.Role == UserRole.Student)
+        {
+            dbContext.Students.Add(new Student
+            {
+                UserId = user.Id,
+                EnrollmentNumber = pending.EnrollmentNumber ?? string.Empty,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        await dbContext.SaveChangesAsync();
+        HttpContext.Session.Remove(PendingRegistrationKey);
+
+        TempData["Success"] = "Registration completed. Wait for admin approval if required.";
+        return RedirectToAction("Index", "Home");
+    }
+
+    [HttpGet]
+    public IActionResult ForgotPassword() => View(new ForgotPasswordViewModel());
+
+    [HttpPost]
+    public async Task<IActionResult> ForgotPassword(ForgotPasswordViewModel model)
+    {
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
+
+        var user = await dbContext.Users.FirstOrDefaultAsync(x => x.PhoneNumber == model.PhoneNumber);
+        if (user is null)
+        {
+            ModelState.AddModelError(string.Empty, "Phone number not found.");
+            return View(model);
+        }
+
+        var otp = await otpService.GenerateOtpAsync(model.PhoneNumber);
+        await otpService.SendOtpSmsPlaceholderAsync(model.PhoneNumber, otp);
+        TempData["Success"] = "OTP generated and sent via SMS placeholder.";
+        TempData["DebugOtp"] = otp;
+        TempData["ResetPasswordPhone"] = model.PhoneNumber;
+
+        return RedirectToAction(nameof(VerifyForgotPasswordOtp));
+    }
+
+    [HttpGet]
+    public IActionResult VerifyForgotPasswordOtp()
+    {
+        var phone = TempData.Peek("ResetPasswordPhone")?.ToString();
+        if (string.IsNullOrWhiteSpace(phone))
+        {
+            return RedirectToAction("Index", "Home");
+        }
+        
+        return View(new VerifyForgotPasswordOtpViewModel { PhoneNumber = phone });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> VerifyForgotPasswordOtp(VerifyForgotPasswordOtpViewModel model)
+    {
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
+
+        var isValid = await otpService.VerifyOtpAsync(model.PhoneNumber, model.OtpCode);
+        if (!isValid)
+        {
+            ModelState.AddModelError(string.Empty, "Invalid or expired OTP.");
+            return View(model);
+        }
+
+        // Leave phone in TempData so ResetPassword can use it
+        return RedirectToAction(nameof(ResetPassword));
+    }
+
+    [HttpGet]
+    public IActionResult ResetPassword()
+    {
+        var phone = TempData.Peek("ResetPasswordPhone")?.ToString();
+        if (string.IsNullOrWhiteSpace(phone))
+        {
+            return RedirectToAction("Index", "Home");
+        }
+
+        return View(new ResetPasswordViewModel { PhoneNumber = phone });
+    }
+
+    [HttpPost]
+    public async Task<IActionResult> ResetPassword(ResetPasswordViewModel model)
+    {
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
+        
+        var verifiedPhone = TempData.Peek("ResetPasswordPhone")?.ToString();
+        if (verifiedPhone != model.PhoneNumber) 
+        {
+            return RedirectToAction("Index", "Home");
+        }
+
+        var user = await dbContext.Users.FirstOrDefaultAsync(x => x.PhoneNumber == model.PhoneNumber);
+        if (user is not null)
+        {
+            user.PasswordHash = PasswordService.HashPassword(model.NewPassword);
+            await dbContext.SaveChangesAsync();
+            
+            TempData["Success"] = "Password reset successfully. Please login.";
+            TempData.Remove("ResetPasswordPhone");
+            return RedirectToAction("Index", "Home");
+        }
+        
+        return View(model);
+    }
+
+    [HttpGet]
+    public IActionResult ChangePassword() => View(new ChangePasswordViewModel());
+
+    [HttpPost]
+    public async Task<IActionResult> ChangePassword(ChangePasswordViewModel model)
+    {
+        if (!ModelState.IsValid)
+        {
+            return View(model);
+        }
+
+        var user = await dbContext.Users.FirstOrDefaultAsync(x => x.PhoneNumber == model.PhoneNumber);
+        if (user is null || !PasswordService.VerifyPassword(model.CurrentPassword, user.PasswordHash))
+        {
+            ModelState.AddModelError(string.Empty, "Invalid phone number or current password.");
+            return View(model);
+        }
+
+        user.PasswordHash = PasswordService.HashPassword(model.NewPassword);
+        await dbContext.SaveChangesAsync();
+
+        TempData["Success"] = "Password changed successfully.";
+        
+        if (user.Role == UserRole.Admin) return RedirectToAction("Dashboard", "Admin");
+        if (user.Role == UserRole.Teacher) return RedirectToAction("Dashboard", "Teacher");
+        if (user.Role == UserRole.Student) return RedirectToAction("Dashboard", "Student");
+        
         return RedirectToAction("Index", "Home");
     }
 

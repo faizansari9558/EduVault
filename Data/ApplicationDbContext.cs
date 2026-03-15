@@ -23,12 +23,13 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<ProgressTracking> ProgressTrackings => Set<ProgressTracking>();
     public DbSet<MaterialPageProgress> MaterialPageProgress => Set<MaterialPageProgress>();
     public DbSet<OtpVerification> OtpVerifications => Set<OtpVerification>();
-
+    public DbSet<SemesterResultPublish> SemesterResultPublishes => Set<SemesterResultPublish>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.Entity<User>().HasIndex(x => x.PhoneNumber).IsUnique();
+        modelBuilder.Entity<User>().HasIndex(x => x.Email).IsUnique();
 
         modelBuilder.Entity<DeletedUser>()
             .HasIndex(x => x.OriginalUserId)
@@ -151,6 +152,22 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .WithMany(x => x.ProgressTrackings)
             .HasForeignKey(x => x.StudentId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<SemesterResultPublish>()
+            .HasIndex(x => x.SemesterId)
+            .IsUnique();
+
+        modelBuilder.Entity<SemesterResultPublish>()
+            .HasOne(x => x.Semester)
+            .WithMany()
+            .HasForeignKey(x => x.SemesterId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<SemesterResultPublish>()
+            .HasOne(x => x.PublishedByAdmin)
+            .WithMany()
+            .HasForeignKey(x => x.PublishedByAdminId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<User>().HasData(
             new User

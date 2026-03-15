@@ -1,0 +1,109 @@
+@model SmartELibrary.ViewModels.SemesterResultDetailViewModel
+@{
+    ViewData["Title"] = $"Results — {Model.SemesterName}";
+}
+
+<div class="d-flex align-items-center gap-3 mb-3 flex-wrap">
+    <h2 class="mb-0">@Model.SemesterName — Results</h2>
+    @if (Model.IsPublished)
+    {
+        <span class="badge bg-success fs-6">Published</span>
+    }
+    else
+    {
+        <span class="badge bg-secondary fs-6">Not Published</span>
+    }
+</div>
+
+@if (TempData["Success"] is string success)
+{
+    <div class="alert alert-success">@success</div>
+}
+
+<div class="mb-3 d-flex gap-2 flex-wrap">
+    <a asp-action="SemesterResults" class="btn btn-outline-secondary btn-sm">← Back to Semesters</a>
+
+    @if (Model.IsPublished)
+    {
+        <form asp-action="UnpublishSemesterResult" method="post" style="display:inline">
+            <input type="hidden" name="semesterId" value="@Model.SemesterId" />
+            <button type="submit" class="btn btn-warning btn-sm"
+                    onclick="return confirm('Unpublish results? Students will no longer see their results.')">
+                Unpublish Results
+            </button>
+        </form>
+    }
+    else
+    {
+        <form asp-action="PublishSemesterResult" method="post" style="display:inline">
+            <input type="hidden" name="semesterId" value="@Model.SemesterId" />
+            <button type="submit" class="btn btn-success btn-sm"
+                    onclick="return confirm('Publish results? All enrolled students will be able to see their results.')">
+                Publish Results
+            </button>
+        </form>
+    }
+</div>
+
+@if (Model.PublishedAtUtc.HasValue)
+{
+    <p class="text-muted small">Published on @Model.PublishedAtUtc.Value.ToLocalTime().ToString("dd MMM yyyy, hh:mm tt")</p>
+}
+
+@if (!Model.Students.Any())
+{
+    <div class="alert alert-info">No approved students enrolled in this semester.</div>
+}
+else
+{
+    <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Student Results (@Model.Students.Count students)</span>
+            <small class="text-muted">Sorted by result (highest first)</small>
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>#</th>
+                        <th>Enrollment No.</th>
+                        <th>Student Name</th>
+                        <th class="text-center">Final Result</th>
+                        <th class="text-center">Status</th>
+                        <th class="text-center">Detail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @{ int rank = 1; }
+                    @foreach (var s in Model.Students)
+                    {
+                        <tr>
+                            <td>@rank</td>
+                            <td>@s.EnrollmentNumber</td>
+                            <td>@s.StudentName</td>
+                            <td class="text-center">
+                                <div class="d-flex align-items-center gap-2 justify-content-center">
+                                    <div class="progress" style="width:80px;height:10px;">
+                                        <div class="progress-bar @SmartELibrary.ViewModels.SemesterResultHelper.GetProgressBarClass(s.FinalResult)"
+                                             style="width:@s.FinalResult%"></div>
+                                    </div>
+                                    <span>@s.FinalResult%</span>
+                                </div>
+                            </td>
+                            <td class="text-center">
+                                <span class="@s.StatusClass fw-semibold">@s.Status</span>
+                            </td>
+                            <td class="text-center">
+                                <a asp-action="AdminStudentResult"
+                                   asp-route-studentId="@s.StudentId"
+                                   asp-route-semesterId="@Model.SemesterId"
+                                   class="btn btn-sm btn-outline-primary">View</a>
+                            </td>
+                        </tr>
+                        rank++;
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}

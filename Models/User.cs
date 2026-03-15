@@ -12,6 +12,9 @@ public class User
     [Required, StringLength(15)]
     public string PhoneNumber { get; set; } = string.Empty;
 
+    [StringLength(150)]
+    public string? Email { get; set; }
+
     [Required]
     public string PasswordHash { get; set; } = string.Empty;
 
