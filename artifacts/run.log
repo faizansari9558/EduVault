@@ -1,1 +1,162 @@
 Using launch settings from D:\SmartELibrary\Properties\launchSettings.json...
+info: Microsoft.EntityFrameworkCore.Migrations[20411]
+      Acquiring an exclusive lock for migration application. See https://aka.ms/efcore-docs-migrations-lock for more information if this takes too long.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (4ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT GET_LOCK('__smartelibrary_db_EFMigrationsLock', 259200)
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      CREATE TABLE IF NOT EXISTS `__EFMigrationsHistory` (
+          `MigrationId` varchar(150) CHARACTER SET utf8mb4 NOT NULL,
+          `ProductVersion` varchar(32) CHARACTER SET utf8mb4 NOT NULL,
+          CONSTRAINT `PK___EFMigrationsHistory` PRIMARY KEY (`MigrationId`)
+      ) CHARACTER SET=utf8mb4;
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (3ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA='smartelibrary_db' AND TABLE_NAME='__EFMigrationsHistory';
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT `MigrationId`, `ProductVersion`
+      FROM `__EFMigrationsHistory`
+      ORDER BY `MigrationId`;
+info: Microsoft.EntityFrameworkCore.Migrations[20405]
+      No migrations were applied. The database is already up to date.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT RELEASE_LOCK('__smartelibrary_db_EFMigrationsLock')
+info: DatabaseStartup[0]
+      Connected database: smartelibrary_db
+info: DatabaseStartup[0]
+      Wipe flags: userGenerated=False, allData=False, noSeed=False
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (33ms) [Parameters=[@__phoneNumber_0='?' (Size = 15)], CommandType='Text', CommandTimeout='180']
+      SELECT `u`.`Id`, `u`.`CreatedAtUtc`, `u`.`Email`, `u`.`EnrollmentNo`, `u`.`FullName`, `u`.`IsApproved`, `u`.`IsPhoneVerified`, `u`.`PasswordHash`, `u`.`PhoneNumber`, `u`.`Role`
+      FROM `Users` AS `u`
+      WHERE `u`.`PhoneNumber` = @__phoneNumber_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@__admin_Id_0='?' (DbType = Int32)], CommandType='Text', CommandTimeout='180']
+      SELECT `a`.`Id`, `a`.`CreatedAtUtc`, `a`.`UserId`
+      FROM `Admins` AS `a`
+      WHERE `a`.`UserId` = @__admin_Id_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT `u`.`Id`, `u`.`Role`, `u`.`EnrollmentNo`
+      FROM `Users` AS `u`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT `a`.`UserId`
+      FROM `Admins` AS `a`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT `t`.`UserId`
+      FROM `Teachers` AS `t`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT `t`.`TeacherId`
+      FROM `Teachers` AS `t`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (0ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT `s`.`UserId`
+      FROM `Students` AS `s`
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://localhost:5099
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: D:\SmartELibrary
+warn: Microsoft.AspNetCore.HttpsPolicy.HttpsRedirectionMiddleware[3]
+      Failed to determine the https port for redirect.
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@__model_PhoneNumber_0='?' (Size = 15)], CommandType='Text', CommandTimeout='180']
+      SELECT `u`.`Id`, `u`.`CreatedAtUtc`, `u`.`Email`, `u`.`EnrollmentNo`, `u`.`FullName`, `u`.`IsApproved`, `u`.`IsPhoneVerified`, `u`.`PasswordHash`, `u`.`PhoneNumber`, `u`.`Role`
+      FROM `Users` AS `u`
+      WHERE (`u`.`PhoneNumber` = @__model_PhoneNumber_0) AND (`u`.`Role` = 1)
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Users` AS `u`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Users` AS `u`
+      WHERE `u`.`Role` = 3
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Users` AS `u`
+      WHERE `u`.`Role` = 2
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (6ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Materials` AS `m`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Quizzes` AS `q`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[@__model_PhoneNumber_0='?' (Size = 15)], CommandType='Text', CommandTimeout='180']
+      SELECT `u`.`Id`, `u`.`CreatedAtUtc`, `u`.`Email`, `u`.`EnrollmentNo`, `u`.`FullName`, `u`.`IsApproved`, `u`.`IsPhoneVerified`, `u`.`PasswordHash`, `u`.`PhoneNumber`, `u`.`Role`
+      FROM `Users` AS `u`
+      WHERE `u`.`PhoneNumber` = @__model_PhoneNumber_0
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (14ms) [Parameters=[@p1='?' (DbType = Int32), @p0='?' (Size = 4000)], CommandType='Text', CommandTimeout='180']
+      SET AUTOCOMMIT = 1;
+      UPDATE `Users` SET `PasswordHash` = @p0
+      WHERE `Id` = @p1;
+      SELECT ROW_COUNT();
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Users` AS `u`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Users` AS `u`
+      WHERE `u`.`Role` = 3
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Users` AS `u`
+      WHERE `u`.`Role` = 2
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Materials` AS `m`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Quizzes` AS `q`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (2ms) [Parameters=[@__model_PhoneNumber_0='?' (Size = 15)], CommandType='Text', CommandTimeout='180']
+      SELECT `u`.`Id`, `u`.`CreatedAtUtc`, `u`.`Email`, `u`.`EnrollmentNo`, `u`.`FullName`, `u`.`IsApproved`, `u`.`IsPhoneVerified`, `u`.`PasswordHash`, `u`.`PhoneNumber`, `u`.`Role`
+      FROM `Users` AS `u`
+      WHERE (`u`.`PhoneNumber` = @__model_PhoneNumber_0) AND (`u`.`Role` = 1)
+      LIMIT 1
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Users` AS `u`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Users` AS `u`
+      WHERE `u`.`Role` = 3
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Users` AS `u`
+      WHERE `u`.`Role` = 2
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Materials` AS `m`
+info: Microsoft.EntityFrameworkCore.Database.Command[20101]
+      Executed DbCommand (1ms) [Parameters=[], CommandType='Text', CommandTimeout='180']
+      SELECT COUNT(*)
+      FROM `Quizzes` AS `q`

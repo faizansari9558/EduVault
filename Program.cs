@@ -61,6 +61,11 @@ using (var scope = app.Services.CreateScope())
     try
     {
         var runMigrations = args.Any(a => string.Equals(a, "--migrate", StringComparison.OrdinalIgnoreCase));
+        if (!runMigrations)
+        {
+            var migrateOnStartup = app.Configuration["MIGRATE_ON_STARTUP"];
+            runMigrations = string.Equals(migrateOnStartup, "true", StringComparison.OrdinalIgnoreCase);
+        }
         if (runMigrations)
         {
             db.Database.Migrate();
