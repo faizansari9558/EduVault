@@ -1,133 +1,144 @@
 # EduVault Information Requirement Document (IRD)
 
-## 1. Project Overview
-EduVault is a web-based academic resource management platform where students and teachers can access, upload, and manage study materials, books, and subject resources.
+## 1. Document Purpose
+This IRD defines the information and process requirements for EduVault, ensuring implementation, operations, and reporting remain aligned across Admin, Teacher, and Student modules.
 
-## 2. Objectives of the System
-- Centralize academic resources for easy access.
-- Enable teachers to upload and manage subject materials.
-- Provide students with structured access to learning content.
-- Support administrative oversight, approvals, and reporting.
-- Ensure secure, role-based access to system functions.
+## 2. Product Overview
+EduVault is a role-based learning platform that manages semester-structured resources, quizzes, enrollment approvals, and progress tracking.
 
-## 3. System Actors
-- Admin
+## 3. Stakeholders and Actors
+- System Admin
 - Teacher
 - Student
 
-## 4. Information Requirements
-- User identity, role, and authentication data.
-- Academic structure: semesters, subjects, topics.
-- Study materials: books, notes, files, links.
-- Resource metadata: title, description, subject, uploader, timestamps.
-- Student enrollments and approvals.
-- Activity data for progress, usage, and reports.
+## 4. Information Domains
+- User identity and access control data
+- Academic hierarchy (semester, subject, topic)
+- Learning resources (chapter pages, files, links)
+- Quiz definitions, questions, and submissions
+- Enrollment requests and approval history
+- Progress, engagement, and result publication data
 
-## 5. Functional Requirements
-- User authentication and role-based authorization.
-- Admin management of users, semesters, subjects, and approvals.
-- Teacher upload and organization of subject resources.
-- Student access to resources based on enrollment and approvals.
-- Resource search and filtering by subject/semester.
-- Reporting and dashboards for admin and teachers.
+## 5. Functional Requirement Groups
+### 5.1 Authentication and Access
+- Role-based login and route authorization
+- Student OTP verification workflow
+- Password recovery and password change workflow
+
+### 5.2 Admin Operations
+- User approval and lifecycle management
+- Semester and subject administration
+- Teacher assignment to subjects
+- Enrollment request decisions
+- Semester result publish/unpublish control
+
+### 5.3 Teacher Operations
+- Chapter creation with multi-page rich content
+- File/link resource upload
+- Quiz creation (chapter-linked and standalone)
+- Student analytics review
+
+### 5.4 Student Operations
+- Semester enrollment request
+- Approved content consumption
+- Quiz participation
+- Published semester result review and print
 
 ## 6. Non-Functional Requirements
-- Usability: simple, teacher-friendly UI.
-- Reliability: consistent data integrity and availability.
-- Security: encrypted passwords, controlled access.
-- Maintainability: clean MVC structure and modular services.
-- Scalability: handle typical institutional usage growth.
+- Usability: simple, workflow-oriented UI for education users
+- Security: role guards, hashed passwords, OTP validation
+- Reliability: transactional saves and consistent data integrity
+- Performance: responsive dashboard/report queries for classroom-scale usage
+- Maintainability: controller-service-data layering with clear entity boundaries
 
 ## 7. Data Requirements
-- Store user profiles with role and approval status.
-- Store academic hierarchy (semester, subject, topic).
-- Store resources with uploader and subject mapping.
-- Store enrollments and approval workflow data.
-- Store progress and interaction data for reporting.
+### 7.1 Core Identity
+- User role, approval state, contact identity, and credentials
 
-## 8. Database Entities
+### 7.2 Academic Structure
+- Semester and subject catalog
+- Topic grouping (optional)
+- Teacher-subject mapping
+
+### 7.3 Learning Content
+- Material metadata and ownership
+- Material pages with sequence order
+- Resource type support (chapter/file/link)
+
+### 7.4 Assessment and Progress
+- Quiz metadata and question bank
+- Quiz attempt outcomes
+- Page progress, reading-time and scroll-depth metrics
+- Aggregated progress percentages
+
+### 7.5 Outcome Publication
+- Semester result publishing state per semester
+- Published timestamp and publishing admin reference
+
+## 8. Entity Inventory
 | Entity | Purpose |
 | --- | --- |
-| Users | Authentication and role-based identity storage. |
-| Admins | Admin profile and linkage to user. |
-| Teachers | Teacher profile and linkage to user. |
-| Students | Student profile and linkage to user. |
-| Semesters | Academic semester definitions. |
-| Subjects | Subject definitions tied to semesters. |
-| Topics | Optional subject sub-grouping. |
-| TeacherSubjects | Mapping of teachers to subjects. |
-| StudentEnrollments | Student-semester enrollments and approvals. |
-| Materials | Uploaded learning resources (notes/files/links). |
-| MaterialPages | Pages for rich-text materials. |
-| MaterialPageProgress | Student progress on pages. |
-| Quizzes | Assessments linked to materials or subjects. |
-| QuizQuestions | Quiz question bank. |
-| QuizResults | Student quiz attempts and scores. |
-| ProgressTrackings | Aggregated learning progress metrics. |
-| OtpVerifications | OTP verification data for login/validation. |
-| DeletedUsers | Archive of deleted accounts. |
-| SemesterResultPublishes | Publish state for semester results. |
+| Users | Base identity and role information |
+| Admins | Admin profile linked to Users |
+| Teachers | Teacher profile linked to Users |
+| Students | Student profile linked to Users |
+| Semesters | Academic semester definitions |
+| Subjects | Semester-bound subject definitions |
+| Topics | Optional subject sub-grouping |
+| TeacherSubjects | Teacher-subject assignment map |
+| StudentEnrollments | Enrollment and approval workflow records |
+| Materials | Learning content master records |
+| MaterialPages | Rich-text pages under chapter materials |
+| MaterialPageProgress | Student chapter page engagement records |
+| Quizzes | Quiz master records |
+| QuizQuestions | Objective question bank |
+| QuizResults | Student quiz submissions and scores |
+| ProgressTrackings | Aggregated performance metrics |
+| OtpVerifications | OTP generation/verification records |
+| DeletedUsers | Soft-audit archive for removed users |
+| SemesterResultPublishes | Semester result visibility control |
 
-## 9. Data Relationships
-- One Subject has many Teachers.
-- One Subject has many Books.
-- One Teacher uploads many Resources.
-- One Subject contains many Resources.
+## 9. Relationship Summary
+- One Semester to many Subjects
+- One Subject to many Topics
+- Many Teachers to many Subjects via TeacherSubjects
+- Many Students to many Semesters via StudentEnrollments
+- One Material to many MaterialPages
+- One MaterialPage to many MaterialPageProgress rows
+- One Quiz to many QuizQuestions
+- One Quiz to many QuizResults
+- One Semester to one publish-state record in SemesterResultPublishes
 
-## 10. System Modules
-- Authentication and Session Management
-- Admin Management
-- Teacher Resource Management
-- Student Resource Access
-- Enrollment and Approval Workflow
-- Reporting and Analytics
-- Result Publication and Viewing
-
-## 11. System Workflow
-1. Admin creates semesters and subjects.
+## 10. Information Lifecycle
+1. Admin initializes semesters and subjects.
 2. Admin assigns teachers to subjects.
-3. Teachers upload resources by subject.
-4. Students request enrollment in semesters.
+3. Teachers publish learning content and quizzes.
+4. Students request semester enrollment.
 5. Admin approves enrollments.
-6. Students access resources based on approval.
-7. System tracks progress and generates reports.
+6. Students consume content and submit quizzes.
+7. System updates progress metrics and report views.
+8. Admin publishes semester results for student visibility.
 
-## 12. Security Requirements
-- Password hashing and secure authentication.
-- Role-based authorization for all endpoints.
-- Session management with inactivity timeouts.
-- Input validation for all forms.
-- Restricted access to admin functions.
+## 11. Security Requirements
+- Hashed password storage for all users
+- Server-side authorization checks by role
+- OTP expiration and one-time use behavior
+- Input validation on all core forms
+- Session timeout and session integrity controls
 
-## 13. Performance Requirements
-- Page load within acceptable classroom use limits.
-- Efficient database queries with indexing.
-- Minimize large file load delays with streaming or pagination.
+## 12. Reporting Requirements
+- Student progress distribution by status bands
+- Engagement alerts for low activity
+- Subject and semester level summaries
+- Semester result breakdown per student
 
-## 14. Storage Requirements
-- Store uploaded files in structured server directories.
-- Maintain resource metadata in MySQL database.
-- Retain logs and audit records for admin operations.
+## 13. Implementation Notes
+- Primary stack: ASP.NET Core MVC + EF Core + MySQL
+- Supports local MySQL (for example XAMPP) and managed MySQL via config
+- Database target can be overridden through runtime configuration
 
-## 15. Dashboard Requirements
-- Admin dashboard: users, subjects, semesters, approvals, reports.
-- Teacher dashboard: uploaded materials, quiz activity, alerts.
-- Student dashboard: enrollment status, resources, results.
-
-## 16. Reporting Requirements
-- Student progress analytics by subject and semester.
-- Quiz performance metrics per class.
-- Engagement and completion statistics.
-
-## 17. Future Enhancements
-- Advanced search with tagging and filters.
-- Real-time notifications for approvals and updates.
-- File versioning and resource history.
-- Exportable analytics dashboards.
-
-## 18. Technology Requirements
-- ASP.NET Core MVC
-- MySQL Database
-- Entity Framework Core
-- Bootstrap 5
-- HTML/CSS
+## 14. Future Extension Considerations
+- External SMS gateway integration
+- Advanced reporting filters and exports
+- Notification center for approvals and publication events
+- Institution-level multi-tenant isolation

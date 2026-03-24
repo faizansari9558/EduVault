@@ -282,3 +282,87 @@ body.light-theme .table {
 body.light-theme .card .text-muted {
     color: #6c757d !important;
 }
+
+@media (max-width: 576px) {
+  .saas-nav {
+    padding: 0.55rem 0.75rem;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+
+  .saas-nav > div:first-child {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    min-width: 0;
+  }
+
+  .saas-nav .brand-link {
+    font-size: 1.05rem;
+    gap: 6px;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+
+  .saas-nav .brand-link svg {
+    width: 26px;
+    height: 26px;
+  }
+
+  .saas-nav > div:last-child {
+    margin-left: auto;
+    gap: 0.4rem !important;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+
+  .saas-nav a[href='/Auth/ChangePassword'] {
+    font-size: 0 !important;
+    margin-right: 0 !important;
+    white-space: nowrap;
+  }
+
+  .saas-nav a[href='/Auth/ChangePassword']::after {
+    content: 'Change Password';
+    font-size: 0.72rem;
+    color: #fff;
+  }
+
+  .saas-nav a[href='/Admin/Dashboard'] {
+    font-size: 0 !important;
+    padding: 6px 10px !important;
+    white-space: nowrap;
+    border-radius: 14px !important;
+  }
+
+  .saas-nav a[href='/Admin/Dashboard']::after {
+    content: 'Dashboard';
+    font-size: 0.72rem;
+    color: #fff;
+  }
+
+  .saas-nav .badge {
+    font-size: 0 !important;
+    padding: 6px 10px !important;
+    border-radius: 14px !important;
+    white-space: nowrap;
+  }
+
+  .saas-nav .badge::after {
+    content: 'Admin';
+    font-size: 0.72rem;
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .saas-nav .user-chip {
+    padding: 6px 10px !important;
+    font-size: 0.72rem !important;
+    line-height: 1.2;
+    border-radius: 14px !important;
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: inline-block;
+  }
+}
