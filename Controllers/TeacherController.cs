@@ -11,8 +11,7 @@ namespace SmartELibrary.Controllers;
 [RoleAuthorize(UserRole.Teacher)]
 public class TeacherController(ApplicationDbContext dbContext, IProgressService progressService, IWebHostEnvironment env) : Controller
 {
-    // Soft validation: approximate "one structured unit" per page.
-    // Rule: ~60 lines OR equivalent character length (plain text extracted from rich text).
+    
     private const int MaxPagePlainTextChars = RichTextContentLengthValidator.MaxPlainTextChars;
 
     public async Task<IActionResult> Dashboard()
@@ -36,10 +35,23 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     public async Task<IActionResult> UploadMaterial()
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
-        ViewBag.Subjects = await dbContext.Subjects
-            .Where(x => dbContext.TeacherSubjects.Any(ts => ts.TeacherId == teacherId && ts.SubjectId == x.Id))
-            .Include(x => x.Semester)
+        var subjIds = await dbContext.TeacherSubjects
+            .Where(ts => ts.TeacherId == teacherId)
+            .Select(ts => ts.SubjectId)
             .ToListAsync();
+        
+        var subjects = await dbContext.Subjects
+            .Where(x => subjIds.Contains(x.Id))
+            .ToListAsync();
+        var semesterIds = subjects.Select(x => x.SemesterId).Distinct().ToList();
+        var semesters = await dbContext.Semesters
+            .Where(x => semesterIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+        foreach (var s in subjects)
+        {
+            if (semesters.TryGetValue(s.SemesterId, out var sem)) s.Semester = sem;
+        }
+        ViewBag.Subjects = subjects;
 
         ViewBag.MaxPageContentLength = MaxPagePlainTextChars;
 
@@ -50,10 +62,20 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     public async Task<IActionResult> UploadMaterial(ChapterUploadViewModel model)
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
-        var teacherSubjects = await dbContext.Subjects
-            .Where(x => dbContext.TeacherSubjects.Any(ts => ts.TeacherId == teacherId && ts.SubjectId == x.Id))
-            .Include(x => x.Semester)
+        var tSubjIds = await dbContext.TeacherSubjects
+            .Where(ts => ts.TeacherId == teacherId)
+            .Select(ts => ts.SubjectId)
             .ToListAsync();
+
+        var teacherSubjects = await dbContext.Subjects
+            .Where(x => tSubjIds.Contains(x.Id))
+            .ToListAsync();
+        var semIds = teacherSubjects.Select(x => x.SemesterId).Distinct().ToList();
+        var sems = await dbContext.Semesters.Where(x => semIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
+        foreach (var s in teacherSubjects)
+        {
+            if (sems.TryGetValue(s.SemesterId, out var sem)) s.Semester = sem;
+        }
 
         var selectedSubject = teacherSubjects.FirstOrDefault(x => x.Id == model.SubjectId);
         if (selectedSubject is null)
@@ -194,13 +216,17 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
         var material = await dbContext.Materials
-            .Include(x => x.Pages)
             .FirstOrDefaultAsync(x => x.Id == materialId && x.TeacherId == teacherId);
 
         if (material is null)
         {
             return NotFound();
         }
+
+        material.Pages = await dbContext.MaterialPages
+            .Where(x => x.MaterialId == material.Id)
+            .OrderBy(x => x.PageNumber)
+            .ToListAsync();
 
         if (!string.Equals(material.FilePathOrUrl, "RICH_TEXT", StringComparison.OrdinalIgnoreCase))
         {
@@ -250,10 +276,26 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
                 .ToList()
         };
 
-        ViewBag.Subjects = await dbContext.Subjects
-            .Where(x => dbContext.TeacherSubjects.Any(ts => ts.TeacherId == teacherId && ts.SubjectId == x.Id))
-            .Include(x => x.Semester)
+        var editSubjIds = await dbContext.TeacherSubjects
+            .Where(ts => ts.TeacherId == teacherId)
+            .Select(ts => ts.SubjectId)
             .ToListAsync();
+            
+        var subjectsForEdit = await dbContext.Subjects
+            .Where(x => editSubjIds.Contains(x.Id))
+            .ToListAsync();
+            
+        var editSemIds = subjectsForEdit.Select(x => x.SemesterId).Distinct().ToList();
+        var editSemesters = await dbContext.Semesters
+            .Where(x => editSemIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+            
+        foreach (var s in subjectsForEdit)
+        {
+            if (editSemesters.TryGetValue(s.SemesterId, out var sem)) s.Semester = sem;
+        }
+        
+        ViewBag.Subjects = subjectsForEdit;
         ViewBag.MaxPageContentLength = MaxPagePlainTextChars;
         ViewBag.IsEdit = true;
         ViewBag.MaterialId = materialId;
@@ -266,7 +308,6 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
         var material = await dbContext.Materials
-            .Include(x => x.Pages)
             .FirstOrDefaultAsync(x => x.Id == materialId && x.TeacherId == teacherId);
 
         if (material is null)
@@ -274,10 +315,34 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
             return NotFound();
         }
 
-        var teacherSubjects = await dbContext.Subjects
-            .Where(x => dbContext.TeacherSubjects.Any(ts => ts.TeacherId == teacherId && ts.SubjectId == x.Id))
-            .Include(x => x.Semester)
+        material.Pages = await dbContext.MaterialPages
+            .Where(x => x.MaterialId == material.Id)
+            .OrderBy(x => x.PageNumber)
             .ToListAsync();
+
+        if (material is null)
+        {
+            return NotFound();
+        }
+
+        var postEditSubjIds = await dbContext.TeacherSubjects
+            .Where(ts => ts.TeacherId == teacherId)
+            .Select(ts => ts.SubjectId)
+            .ToListAsync();
+            
+        var teacherSubjects = await dbContext.Subjects
+            .Where(x => postEditSubjIds.Contains(x.Id))
+            .ToListAsync();
+            
+        var postEditSemIds = teacherSubjects.Select(x => x.SemesterId).Distinct().ToList();
+        var postEditSemesters = await dbContext.Semesters
+            .Where(x => postEditSemIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+            
+        foreach (var s in teacherSubjects)
+        {
+            if (postEditSemesters.TryGetValue(s.SemesterId, out var sem)) s.Semester = sem;
+        }
 
         var selectedSubject = teacherSubjects.FirstOrDefault(x => x.Id == model.SubjectId);
         if (selectedSubject is null)
@@ -558,14 +623,28 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     public async Task<IActionResult> Materials()
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
-        var materials = await dbContext.Materials
-            .Include(x => x.Semester)
-            .Include(x => x.Subject)
-            .Include(x => x.Pages)
+        var materialsRaw = await dbContext.Materials
             .Where(x => x.TeacherId == teacherId)
-            .OrderByDescending(x => x.UploadedAtUtc)
             .ToListAsync();
 
+        var semesterIds = materialsRaw.Select(x => x.SemesterId).Distinct().ToList();
+        var semesters = await dbContext.Semesters.Where(x => semesterIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
+        
+        var subjectIds = materialsRaw.Select(x => x.SubjectId).Distinct().ToList();
+        var subjects = await dbContext.Subjects.Where(x => subjectIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
+        
+        var materialIds = materialsRaw.Select(x => x.Id).ToList();
+        var allPages = await dbContext.MaterialPages.Where(x => materialIds.Contains(x.MaterialId)).ToListAsync();
+        var pagesByMaterial = allPages.GroupBy(x => x.MaterialId).ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var m in materialsRaw)
+        {
+            if (semesters.TryGetValue(m.SemesterId, out var sem)) m.Semester = sem;
+            if (subjects.TryGetValue(m.SubjectId, out var sub)) m.Subject = sub;
+            if (pagesByMaterial.TryGetValue(m.Id, out var pages)) m.Pages = pages;
+        }
+
+        var materials = materialsRaw.OrderByDescending(x => x.UploadedAtUtc).ToList();
         return View(materials);
     }
 
@@ -575,12 +654,29 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     public async Task<IActionResult> UploadFile()
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
-        ViewBag.Subjects = await dbContext.Subjects
-            .Where(x => dbContext.TeacherSubjects.Any(ts => ts.TeacherId == teacherId && ts.SubjectId == x.Id))
-            .Include(x => x.Semester)
-            .OrderBy(x => x.Semester!.Name)
-            .ThenBy(x => x.Name)
+        var subIdsList = await dbContext.TeacherSubjects
+            .Where(ts => ts.TeacherId == teacherId)
+            .Select(ts => ts.SubjectId)
             .ToListAsync();
+        
+        var subjectsList = await dbContext.Subjects
+            .Where(x => subIdsList.Contains(x.Id))
+            .ToListAsync();
+            
+        var semesterIdsBySub = subjectsList.Select(x => x.SemesterId).Distinct().ToList();
+        var semestersBySub = await dbContext.Semesters
+            .Where(x => semesterIdsBySub.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+            
+        foreach (var s in subjectsList)
+        {
+            if (semestersBySub.TryGetValue(s.SemesterId, out var sem)) s.Semester = sem;
+        }
+
+        ViewBag.Subjects = subjectsList
+            .OrderBy(x => x.Semester?.Name ?? "")
+            .ThenBy(x => x.Name)
+            .ToList();
         return View(new MaterialUploadViewModel());
     }
 
@@ -588,12 +684,29 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     public async Task<IActionResult> UploadFile(MaterialUploadViewModel model)
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
-        var teacherSubjects = await dbContext.Subjects
-            .Where(x => dbContext.TeacherSubjects.Any(ts => ts.TeacherId == teacherId && ts.SubjectId == x.Id))
-            .Include(x => x.Semester)
-            .OrderBy(x => x.Semester!.Name)
-            .ThenBy(x => x.Name)
+        var teacherSubIds = await dbContext.TeacherSubjects
+            .Where(ts => ts.TeacherId == teacherId)
+            .Select(ts => ts.SubjectId)
             .ToListAsync();
+
+        var teacherSubjectsList = await dbContext.Subjects
+            .Where(x => teacherSubIds.Contains(x.Id))
+            .ToListAsync();
+            
+        var teacherSemIds = teacherSubjectsList.Select(x => x.SemesterId).Distinct().ToList();
+        var teacherSemesters = await dbContext.Semesters
+            .Where(x => teacherSemIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+            
+        foreach (var s in teacherSubjectsList)
+        {
+            if (teacherSemesters.TryGetValue(s.SemesterId, out var sem)) s.Semester = sem;
+        }
+
+        var teacherSubjects = teacherSubjectsList
+            .OrderBy(x => x.Semester?.Name ?? "")
+            .ThenBy(x => x.Name)
+            .ToList();
 
         var selectedSubject = teacherSubjects.FirstOrDefault(x => x.Id == model.SubjectId);
         if (selectedSubject is null)
@@ -708,12 +821,29 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     public async Task<IActionResult> CreateQuiz()
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
-        ViewBag.Subjects = await dbContext.Subjects
-            .Where(x => dbContext.TeacherSubjects.Any(ts => ts.TeacherId == teacherId && ts.SubjectId == x.Id))
-            .Include(x => x.Semester)
-            .OrderBy(x => x.Semester!.Name)
-            .ThenBy(x => x.Name)
+        var createQuizSubIds = await dbContext.TeacherSubjects
+            .Where(ts => ts.TeacherId == teacherId)
+            .Select(ts => ts.SubjectId)
             .ToListAsync();
+
+        var createQuizSubjects = await dbContext.Subjects
+            .Where(x => createQuizSubIds.Contains(x.Id))
+            .ToListAsync();
+            
+        var createQuizSemIds = createQuizSubjects.Select(x => x.SemesterId).Distinct().ToList();
+        var createQuizSemesters = await dbContext.Semesters
+            .Where(x => createQuizSemIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+            
+        foreach (var s in createQuizSubjects)
+        {
+            if (createQuizSemesters.TryGetValue(s.SemesterId, out var sem)) s.Semester = sem;
+        }
+
+        ViewBag.Subjects = createQuizSubjects
+            .OrderBy(x => x.Semester?.Name ?? "")
+            .ThenBy(x => x.Name)
+            .ToList();
         return View(new StandaloneQuizViewModel());
     }
 
@@ -721,12 +851,29 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     public async Task<IActionResult> CreateQuiz(StandaloneQuizViewModel model)
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
-        var teacherSubjects = await dbContext.Subjects
-            .Where(x => dbContext.TeacherSubjects.Any(ts => ts.TeacherId == teacherId && ts.SubjectId == x.Id))
-            .Include(x => x.Semester)
-            .OrderBy(x => x.Semester!.Name)
-            .ThenBy(x => x.Name)
+        var teacherQuizSubIds = await dbContext.TeacherSubjects
+            .Where(ts => ts.TeacherId == teacherId)
+            .Select(ts => ts.SubjectId)
             .ToListAsync();
+
+        var teacherQuizSubjectsList = await dbContext.Subjects
+            .Where(x => teacherQuizSubIds.Contains(x.Id))
+            .ToListAsync();
+            
+        var teacherQuizSemIds = teacherQuizSubjectsList.Select(x => x.SemesterId).Distinct().ToList();
+        var teacherQuizSemesters = await dbContext.Semesters
+            .Where(x => teacherQuizSemIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+            
+        foreach (var s in teacherQuizSubjectsList)
+        {
+            if (teacherQuizSemesters.TryGetValue(s.SemesterId, out var sem)) s.Semester = sem;
+        }
+
+        var teacherSubjects = teacherQuizSubjectsList
+            .OrderBy(x => x.Semester?.Name ?? "")
+            .ThenBy(x => x.Name)
+            .ToList();
 
         var selectedSubject = teacherSubjects.FirstOrDefault(x => x.Id == model.SubjectId);
         if (selectedSubject is null)
@@ -793,14 +940,33 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     public async Task<IActionResult> Quizzes()
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
-        var quizzes = await dbContext.Quizzes
-            .Include(x => x.Subject)
-            .ThenInclude(x => x!.Semester)
-            .Include(x => x.QuizQuestions)
-            .Include(x => x.QuizResults)
+        var quizzesRaw = await dbContext.Quizzes
             .Where(x => x.TeacherId == teacherId && x.MaterialPageId == null)
             .OrderByDescending(x => x.Id)
             .ToListAsync();
+
+        var subjectIds = quizzesRaw.Select(x => x.SubjectId).Distinct().ToList();
+        var subjects = await dbContext.Subjects.Where(x => subjectIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
+        var semesterIds = subjects.Values.Select(x => x.SemesterId).Distinct().ToList();
+        var semesters = await dbContext.Semesters.Where(x => semesterIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
+        
+        var quizIds = quizzesRaw.Select(x => x.Id).ToList();
+        var questions = (await dbContext.QuizQuestions.Where(x => quizIds.Contains(x.QuizId)).ToListAsync())
+            .GroupBy(x => x.QuizId).ToDictionary(g => g.Key, g => g.ToList());
+        var results = (await dbContext.QuizResults.Where(x => quizIds.Contains(x.QuizId)).ToListAsync())
+            .GroupBy(x => x.QuizId).ToDictionary(g => g.Key, g => g.ToList());
+        
+        foreach (var q in quizzesRaw)
+        {
+            if (subjects.TryGetValue(q.SubjectId, out var sub)) 
+            {
+                q.Subject = sub;
+                if (semesters.TryGetValue(sub.SemesterId, out var sem)) sub.Semester = sem;
+            }
+            if (questions.TryGetValue(q.Id, out var qs)) q.QuizQuestions = qs;
+            if (results.TryGetValue(q.Id, out var rs)) q.QuizResults = rs;
+        }
+        var quizzes = quizzesRaw;
 
         return View(quizzes);
     }
@@ -811,10 +977,15 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
     {
         var teacherId = HttpContext.Session.GetInt32("UserId") ?? 0;
 
-        var quiz = await dbContext.Quizzes
-            .Include(x => x.Subject)
-            .Include(x => x.QuizQuestions)
+        var quizRaw = await dbContext.Quizzes
             .FirstOrDefaultAsync(x => x.Id == quizId && x.TeacherId == teacherId);
+
+        if (quizRaw == null) return NotFound();
+
+        quizRaw.Subject = await dbContext.Subjects.FindAsync(quizRaw.SubjectId);
+        quizRaw.QuizQuestions = await dbContext.QuizQuestions.Where(x => x.QuizId == quizRaw.Id).ToListAsync();
+
+        var quiz = quizRaw;
 
         if (quiz is null)
             return NotFound();
@@ -879,45 +1050,82 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
             .Select(x => x.Id)
             .ToListAsync();
 
-        var totalPagesBySemester = await dbContext.MaterialPages
-            .Include(x => x.Material)
+        var pagesForProgressRaw = await dbContext.MaterialPages
             .Where(x => materialIds.Contains(x.MaterialId))
+            .ToListAsync();
+        
+        var matIdsInPages = pagesForProgressRaw.Select(x => x.MaterialId).Distinct().ToList();
+        var materialsDict = await dbContext.Materials.Where(x => matIdsInPages.Contains(x.Id)).ToDictionaryAsync(m => m.Id);
+        foreach (var p in pagesForProgressRaw)
+        {
+            if (materialsDict.TryGetValue(p.MaterialId, out var m)) p.Material = m;
+        }
+        var pagesForProgress = pagesForProgressRaw;
+
+        var totalPagesBySemester = pagesForProgress
             .GroupBy(x => x.Material!.SemesterId)
-            .Select(g => new { SemesterId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.SemesterId, x => x.Count);
+            .ToDictionary(g => g.Key, g => g.Count());
 
-        var pageProgress = await dbContext.MaterialPageProgress
-            .Include(x => x.Student)
-            .Include(x => x.MaterialPage)
-            .ThenInclude(x => x!.Material)
-            .Where(x => materialIds.Contains(x.MaterialPage!.MaterialId))
+        var pageProgressRaw = await dbContext.MaterialPageProgress
             .ToListAsync();
+        
+        // Filter in memory for materialIds
+        var pageProgress = pageProgressRaw
+            .Where(x => {
+                var page = pagesForProgress.FirstOrDefault(p => p.Id == x.MaterialPageId);
+                return page != null && materialIds.Contains(page.MaterialId);
+            })
+            .ToList();
 
-        var quizResults = await dbContext.QuizResults
-            .Include(x => x.Quiz)
-            .Where(x => x.Quiz!.MaterialPageId != null && materialIds.Contains(x.Quiz.MaterialId ?? 0))
-            .ToListAsync();
+        var studentIdsInProgress = pageProgress.Select(x => x.StudentId).Distinct().ToList();
+        var studentsInProgress = await dbContext.Users.Where(u => studentIdsInProgress.Contains(u.Id)).ToDictionaryAsync(u => u.Id);
+        
+        foreach (var pp in pageProgress)
+        {
+             if (studentsInProgress.TryGetValue(pp.StudentId, out var s)) pp.Student = s;
+             if (pagesForProgress.FirstOrDefault(p => p.Id == pp.MaterialPageId) is { } page) pp.MaterialPage = page;
+        }
 
         var pageQuizIds = await dbContext.Quizzes
             .Where(x => x.MaterialPageId != null && materialIds.Contains(x.MaterialId ?? 0))
             .Select(x => x.Id)
             .ToListAsync();
 
-        var quizQuestionCounts = pageQuizIds.Count == 0
-            ? new Dictionary<int, int>()
+        var quizQuestionsForProgressGroups = pageQuizIds.Count == 0
+            ? new List<QuizQuestion>()
             : await dbContext.QuizQuestions
                 .Where(x => pageQuizIds.Contains(x.QuizId))
-                .GroupBy(x => x.QuizId)
-                .Select(g => new { QuizId = g.Key, Count = g.Count() })
-                .ToDictionaryAsync(x => x.QuizId, x => x.Count);
+                .ToListAsync();
 
-        var totalQuizQuestionsBySemester = await dbContext.QuizQuestions
-            .Include(x => x.Quiz)
-            .ThenInclude(x => x!.Material)
-            .Where(x => x.Quiz!.MaterialPageId != null && materialIds.Contains(x.Quiz.MaterialId ?? 0))
+        var quizQuestionCounts = quizQuestionsForProgressGroups
+                .GroupBy(x => x.QuizId)
+                .ToDictionary(g => g.Key, g => g.Count());
+
+        var quizResultsRaw = await dbContext.QuizResults.ToListAsync();
+        var quizIdsInResults = quizResultsRaw.Select(r => r.QuizId).Distinct().ToList();
+        var quizzesInResults = await dbContext.Quizzes.Where(q => quizIdsInResults.Contains(q.Id)).ToDictionaryAsync(q => q.Id);
+        
+        foreach (var qr in quizResultsRaw)
+        {
+            if (quizzesInResults.TryGetValue(qr.QuizId, out var q)) 
+            {
+                qr.Quiz = q;
+                if (q.MaterialId.HasValue && materialsDict.TryGetValue(q.MaterialId.Value, out var m)) q.Material = m;
+            }
+        }
+
+        var quizResults = quizResultsRaw
+            .Where(x => x.Quiz?.MaterialPageId != null && materialIds.Contains(x.Quiz.MaterialId ?? 0))
+            .ToList();
+
+        var totalQuizQuestionsBySemester = quizQuestionsForProgressGroups
+            .Select(x => {
+                if (quizzesInResults.TryGetValue(x.QuizId, out var q)) x.Quiz = q;
+                return x;
+            })
+            .Where(x => x.Quiz?.Material != null && x.Quiz.MaterialPageId != null)
             .GroupBy(x => x.Quiz!.Material!.SemesterId)
-            .Select(g => new { SemesterId = g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.SemesterId, x => x.Count);
+            .ToDictionary(g => g.Key, g => g.Count());
 
         var studentIds = pageProgress.Select(x => x.StudentId)
             .Concat(quizResults.Select(x => x.StudentId))
@@ -937,11 +1145,17 @@ public class TeacherController(ApplicationDbContext dbContext, IProgressService 
             .Select(x => new { x.UserId, x.EnrollmentNumber })
             .ToDictionaryAsync(x => x.UserId, x => x.EnrollmentNumber);
 
-        var enrollments = await dbContext.StudentEnrollments
-            .Include(x => x.Semester)
+        var enrollmentsRaw = await dbContext.StudentEnrollments
             .Where(x => studentIds.Contains(x.StudentId))
-            .OrderBy(x => x.SemesterId)
             .ToListAsync();
+            
+        var eSemIds = enrollmentsRaw.Select(x => x.SemesterId).Distinct().ToList();
+        var eSemesters = await dbContext.Semesters.Where(x => eSemIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id);
+        foreach (var e in enrollmentsRaw)
+        {
+            if (eSemesters.TryGetValue(e.SemesterId, out var sem)) e.Semester = sem;
+        }
+        var enrollments = enrollmentsRaw.OrderBy(x => x.SemesterId).ToList();
 
         var enrollmentsByStudentId = enrollments
             .GroupBy(x => x.StudentId)

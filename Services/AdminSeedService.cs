@@ -6,7 +6,7 @@ namespace SmartELibrary.Services;
 
 public static class AdminSeedService
 {
-    public static async Task EnsureAdminExistsAsync(ApplicationDbContext dbContext, string phoneNumber, string password, string fullName = "System Admin")
+    public static async Task EnsureAdminExistsAsync(ApplicationDbContext dbContext, IMongoSequenceService sequenceService, string phoneNumber, string password, string fullName = "System Admin")
     {
         phoneNumber = (phoneNumber ?? string.Empty).Trim();
         password = password ?? string.Empty;
@@ -22,6 +22,7 @@ public static class AdminSeedService
             var existingAdmin = await dbContext.Admins.FirstOrDefaultAsync(x => x.UserId == admin.Id);
             if (existingAdmin is null)
             {
+                // Id will be auto-assigned by SaveChangesAsync override in ApplicationDbContext
                 dbContext.Admins.Add(new Admin { UserId = admin.Id, CreatedAtUtc = DateTime.UtcNow });
                 await dbContext.SaveChangesAsync();
             }
@@ -30,6 +31,7 @@ public static class AdminSeedService
 
         var user = new User
         {
+            // Id will be auto-assigned by SaveChangesAsync override in ApplicationDbContext
             FullName = fullName,
             PhoneNumber = phoneNumber,
             PasswordHash = PasswordService.HashPassword(password),
@@ -39,7 +41,7 @@ public static class AdminSeedService
         };
 
         dbContext.Users.Add(user);
-        await dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync(); // user.Id is now assigned
 
         dbContext.Admins.Add(new Admin
         {

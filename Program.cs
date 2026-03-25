@@ -18,21 +18,18 @@ if (builder.Environment.IsDevelopment())
 }
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
-    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-    if (string.IsNullOrWhiteSpace(connectionString))
-    {
-        var host = builder.Configuration["Database:Host"] ?? "localhost";
-        var port = builder.Configuration["Database:Port"] ?? "3306";
-        var name = builder.Configuration["Database:Name"] ?? "smartelibrary_db";
-        var user = builder.Configuration["Database:User"] ?? "root";
-        var password = builder.Configuration["Database:Password"] ?? string.Empty;
-        connectionString = $"server={host};port={port};database={name};user={user};password={password};";
-    }
-
-    options.UseMySql(
-        connectionString,
-        new MySqlServerVersion(new Version(8, 0, 36)),
-        mySqlOptions => mySqlOptions.CommandTimeout(180));
+    var rawConnectionString =
+        builder.Configuration.GetConnectionString("DefaultConnection")
+        ?? builder.Configuration["MONGODB_URI"];
+    if (string.IsNullOrEmpty(rawConnectionString))
+        throw new InvalidOperationException(
+            "MongoDB connection string is not configured. "
+            + "Set ConnectionStrings__DefaultConnection or MONGODB_URI as an environment variable.");
+    var databaseName =
+        builder.Configuration["Database:Name"]
+        ?? builder.Configuration["MONGODB_DATABASE"]
+        ?? "EduVaultDB";
+    options.UseMongoDB(rawConnectionString, databaseName);
 });
 
 builder.Services.AddSession(options =>
@@ -49,12 +46,14 @@ builder.Services.AddScoped<ITeacherCodeGenerator, TeacherCodeGenerator>();
 builder.Services.AddScoped<IStudentSemesterApprovalService, StudentSemesterApprovalService>();
 builder.Services.AddScoped<StudentSemesterApprovalFilter>();
 builder.Services.AddSingleton<IStudentSessionTracker, StudentSessionTracker>();
+builder.Services.AddSingleton<IMongoSequenceService, MongoSequenceService>();
 
 var app = builder.Build();
 
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    var sequenceService = scope.ServiceProvider.GetRequiredService<IMongoSequenceService>();
     var logger = scope.ServiceProvider
         .GetRequiredService<ILoggerFactory>()
         .CreateLogger("DatabaseStartup");
@@ -68,7 +67,9 @@ using (var scope = app.Services.CreateScope())
         }
         if (runMigrations)
         {
-            db.Database.Migrate();
+            // MongoDB doesn't use relational migrations. 
+            // We can add index creation here if needed.
+            logger.LogInformation("Automatic migrations are not supported for MongoDB. Skipping.");
         }
         else
         {
@@ -79,7 +80,7 @@ using (var scope = app.Services.CreateScope())
         var wipeAllData = args.Any(a => string.Equals(a, "--wipe-all-data", StringComparison.OrdinalIgnoreCase));
         var noSeed = args.Any(a => string.Equals(a, "--no-seed", StringComparison.OrdinalIgnoreCase));
 
-        logger.LogInformation("Connected database: {Database}", db.Database.GetDbConnection().Database);
+        logger.LogInformation("Connected to MongoDB.");
         logger.LogInformation("Wipe flags: userGenerated={WipeUserGenerated}, allData={WipeAllData}, noSeed={NoSeed}", wipeUserGenerated, wipeAllData, noSeed);
 
         if (wipeAllData)
@@ -118,7 +119,7 @@ using (var scope = app.Services.CreateScope())
         var adminPhone = app.Configuration["AdminSeed:PhoneNumber"];
         var adminPassword = app.Configuration["AdminSeed:Password"];
         var adminName = app.Configuration["AdminSeed:FullName"] ?? "System Admin";
-        await AdminSeedService.EnsureAdminExistsAsync(db, adminPhone ?? string.Empty, adminPassword ?? string.Empty, adminName);
+        await AdminSeedService.EnsureAdminExistsAsync(db, sequenceService, adminPhone ?? string.Empty, adminPassword ?? string.Empty, adminName);
 
         await RoleTableBackfillService.BackfillAsync(db);
 
