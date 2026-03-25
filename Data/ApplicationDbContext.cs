@@ -1,9 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using MongoDB.EntityFrameworkCore.Extensions;
 using SmartELibrary.Models;
+using SmartELibrary.Services;
 
 namespace SmartELibrary.Data;
 
-public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options) : DbContext(options)
+public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options, IMongoSequenceService sequenceService) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<DeletedUser> DeletedUsers => Set<DeletedUser>();
@@ -24,161 +26,118 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<MaterialPageProgress> MaterialPageProgress => Set<MaterialPageProgress>();
     public DbSet<OtpVerification> OtpVerifications => Set<OtpVerification>();
     public DbSet<SemesterResultPublish> SemesterResultPublishes => Set<SemesterResultPublish>();
+
+    // Collection name -> the entity type mapping used for sequence service
+    private static readonly Dictionary<Type, string> _collectionNames = new()
+    {
+        { typeof(User), "users" },
+        { typeof(DeletedUser), "deleted_users" },
+        { typeof(Admin), "admins" },
+        { typeof(Teacher), "teachers" },
+        { typeof(Student), "students" },
+        { typeof(Semester), "semesters" },
+        { typeof(Subject), "subjects" },
+        { typeof(Topic), "topics" },
+        { typeof(TeacherSubject), "teacher_subjects" },
+        { typeof(StudentEnrollment), "student_enrollments" },
+        { typeof(Material), "materials" },
+        { typeof(MaterialPage), "material_pages" },
+        { typeof(Quiz), "quizzes" },
+        { typeof(QuizQuestion), "quiz_questions" },
+        { typeof(QuizResult), "quiz_results" },
+        { typeof(ProgressTracking), "progress_trackings" },
+        { typeof(MaterialPageProgress), "material_page_progress" },
+        { typeof(OtpVerification), "otp_verifications" },
+        { typeof(SemesterResultPublish), "semester_result_publishes" },
+    };
+
+    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        // Auto-assign IDs to any Added entity that still has Id == 0
+        var newEntries = ChangeTracker.Entries()
+            .Where(e => e.State == EntityState.Added)
+            .ToList();
+
+        foreach (var entry in newEntries)
+        {
+            var entityType = entry.Entity.GetType();
+            var idProperty = entityType.GetProperty("Id");
+            if (idProperty is null || idProperty.PropertyType != typeof(int)) continue;
+
+            var currentId = (int)(idProperty.GetValue(entry.Entity) ?? 0);
+            if (currentId != 0) continue; // already assigned
+
+            if (_collectionNames.TryGetValue(entityType, out var collectionName))
+            {
+                var nextId = await sequenceService.GetNextIdAsync(collectionName, cancellationToken);
+                idProperty.SetValue(entry.Entity, nextId);
+            }
+        }
+
+        return await base.SaveChangesAsync(cancellationToken);
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        modelBuilder.Entity<User>().HasIndex(x => x.PhoneNumber).IsUnique();
-        modelBuilder.Entity<User>().HasIndex(x => x.Email).IsUnique();
+        modelBuilder.Entity<User>().ToCollection("users");
+        modelBuilder.Entity<DeletedUser>().ToCollection("deleted_users");
+        modelBuilder.Entity<Admin>().ToCollection("admins");
+        modelBuilder.Entity<Teacher>().ToCollection("teachers");
+        modelBuilder.Entity<Student>().ToCollection("students");
+        modelBuilder.Entity<Semester>().ToCollection("semesters");
+        modelBuilder.Entity<Subject>().ToCollection("subjects");
+        modelBuilder.Entity<Topic>().ToCollection("topics");
+        modelBuilder.Entity<TeacherSubject>().ToCollection("teacher_subjects");
+        modelBuilder.Entity<StudentEnrollment>().ToCollection("student_enrollments");
+        modelBuilder.Entity<Material>().ToCollection("materials");
+        modelBuilder.Entity<MaterialPage>().ToCollection("material_pages");
+        modelBuilder.Entity<Quiz>().ToCollection("quizzes");
+        modelBuilder.Entity<QuizQuestion>().ToCollection("quiz_questions");
+        modelBuilder.Entity<QuizResult>().ToCollection("quiz_results");
+        modelBuilder.Entity<ProgressTracking>().ToCollection("progress_trackings");
+        modelBuilder.Entity<MaterialPageProgress>().ToCollection("material_page_progress");
+        modelBuilder.Entity<OtpVerification>().ToCollection("otp_verifications");
+        modelBuilder.Entity<SemesterResultPublish>().ToCollection("semester_result_publishes");
 
-        modelBuilder.Entity<DeletedUser>()
-            .HasIndex(x => x.OriginalUserId)
-            .IsUnique();
+        // Explicitly define relationships to help MongoDB provider with Includes
+        modelBuilder.Entity<StudentEnrollment>(entity =>
+        {
+            entity.HasOne(x => x.Student).WithMany().HasForeignKey(x => x.StudentId);
+            entity.HasOne(x => x.Semester).WithMany().HasForeignKey(x => x.SemesterId);
+        });
 
-        // Keep default column naming for compatibility with existing migrations/schema:
-        // Users.FullName, Users.CreatedAtUtc
+        modelBuilder.Entity<Subject>(entity =>
+        {
+            entity.HasOne(x => x.Semester).WithMany().HasForeignKey(x => x.SemesterId);
+        });
 
-        modelBuilder.Entity<Admin>()
-            .HasIndex(x => x.UserId)
-            .IsUnique();
+        modelBuilder.Entity<Material>(entity =>
+        {
+            entity.HasOne(x => x.Semester).WithMany().HasForeignKey(x => x.SemesterId);
+            entity.HasOne(x => x.Subject).WithMany().HasForeignKey(x => x.SubjectId);
+        });
 
-        modelBuilder.Entity<Teacher>()
-            .HasIndex(x => x.UserId)
-            .IsUnique();
+        modelBuilder.Entity<Quiz>(entity =>
+        {
+            entity.HasOne(x => x.Subject).WithMany().HasForeignKey(x => x.SubjectId);
+            entity.HasOne(x => x.Material).WithMany().HasForeignKey(x => x.MaterialId);
+        });
 
-        modelBuilder.Entity<Teacher>()
-            .HasIndex(x => x.TeacherId)
-            .IsUnique();
+        modelBuilder.Entity<QuizQuestion>(entity =>
+        {
+            entity.HasOne(x => x.Quiz).WithMany(x => x.QuizQuestions).HasForeignKey(x => x.QuizId);
+        });
 
-        modelBuilder.Entity<Student>()
-            .HasIndex(x => x.UserId)
-            .IsUnique();
+        modelBuilder.Entity<MaterialPage>(entity =>
+        {
+            entity.HasOne(x => x.Material).WithMany(x => x.Pages).HasForeignKey(x => x.MaterialId);
+        });
 
-        modelBuilder.Entity<TeacherSubject>()
-            .HasIndex(x => new { x.TeacherId, x.SubjectId })
-            .IsUnique();
-
-        modelBuilder.Entity<StudentEnrollment>()
-            .HasIndex(x => new { x.StudentId, x.SemesterId })
-            .IsUnique();
-
-        modelBuilder.Entity<StudentEnrollment>()
-            .Property(x => x.ApprovedAtUtc)
-            .HasColumnName("ApprovedAt");
-
-        modelBuilder.Entity<QuizResult>()
-            .HasIndex(x => new { x.QuizId, x.StudentId });
-
-        modelBuilder.Entity<QuizResult>()
-            .Property(x => x.AntiCheatReason)
-            .HasMaxLength(120);
-
-        modelBuilder.Entity<MaterialPage>()
-            .HasIndex(x => new { x.MaterialId, x.PageNumber })
-            .IsUnique();
-
-        modelBuilder.Entity<MaterialPageProgress>()
-            .HasIndex(x => new { x.StudentId, x.MaterialPageId })
-            .IsUnique();
-
-        modelBuilder.Entity<Material>()
-            .HasOne(x => x.Teacher)
-            .WithMany(x => x.Materials)
-            .HasForeignKey(x => x.TeacherId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        modelBuilder.Entity<Admin>()
-            .HasOne(x => x.User)
-            .WithOne(x => x.Admin)
-            .HasForeignKey<Admin>(x => x.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<Teacher>()
-            .HasOne(x => x.User)
-            .WithOne(x => x.Teacher)
-            .HasForeignKey<Teacher>(x => x.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<Student>()
-            .HasOne(x => x.User)
-            .WithOne(x => x.Student)
-            .HasForeignKey<Student>(x => x.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<MaterialPage>()
-            .HasOne(x => x.Material)
-            .WithMany(x => x.Pages)
-            .HasForeignKey(x => x.MaterialId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<MaterialPageProgress>()
-            .HasOne(x => x.Student)
-            .WithMany()
-            .HasForeignKey(x => x.StudentId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        modelBuilder.Entity<MaterialPageProgress>()
-            .HasOne(x => x.MaterialPage)
-            .WithMany(x => x.PageProgress)
-            .HasForeignKey(x => x.MaterialPageId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<TeacherSubject>()
-            .HasOne(x => x.Teacher)
-            .WithMany(x => x.TeacherSubjects)
-            .HasForeignKey(x => x.TeacherId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        modelBuilder.Entity<StudentEnrollment>()
-            .HasOne(x => x.Student)
-            .WithMany()
-            .HasForeignKey(x => x.StudentId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        modelBuilder.Entity<StudentEnrollment>()
-            .HasOne(x => x.ApprovedByAdmin)
-            .WithMany()
-            .HasForeignKey(x => x.ApprovedByAdminId)
-            .OnDelete(DeleteBehavior.SetNull);
-
-        modelBuilder.Entity<QuizResult>()
-            .HasOne(x => x.Student)
-            .WithMany(x => x.QuizResults)
-            .HasForeignKey(x => x.StudentId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        modelBuilder.Entity<ProgressTracking>()
-            .HasOne(x => x.Student)
-            .WithMany(x => x.ProgressTrackings)
-            .HasForeignKey(x => x.StudentId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        modelBuilder.Entity<SemesterResultPublish>()
-            .HasIndex(x => x.SemesterId)
-            .IsUnique();
-
-        modelBuilder.Entity<SemesterResultPublish>()
-            .HasOne(x => x.Semester)
-            .WithMany()
-            .HasForeignKey(x => x.SemesterId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<SemesterResultPublish>()
-            .HasOne(x => x.PublishedByAdmin)
-            .WithMany()
-            .HasForeignKey(x => x.PublishedByAdminId)
-            .OnDelete(DeleteBehavior.SetNull);
-
-        modelBuilder.Entity<User>().HasData(
-            new User
-            {
-                Id = 1,
-                FullName = "System Admin",
-                PhoneNumber = "9999999999",
-                PasswordHash = "pqp7RUbHAaT3rE1FB2yLYA==.DDvLiDdTGAeURgKOJzbSL8PIJIMsve3hWpUHfv9JOrk=",
-                Role = UserRole.Admin,
-                IsApproved = true,
-                CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc)
-            });
+        modelBuilder.Entity<QuizResult>(entity =>
+        {
+            entity.HasOne(x => x.Quiz).WithMany(x => x.QuizResults).HasForeignKey(x => x.QuizId);
+        });
     }
 }
